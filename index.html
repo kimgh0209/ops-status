@@ -185,6 +185,7 @@ input.ocr { outline: 3px solid #e0a800; background: rgba(224, 168, 0, .16) !impo
   <header>
     
     <p class="sub" id="today"></p>
+    <p class="hint ocrnote" id="ocrNote" hidden>노란 칸은 요약 화면 사진에서 읽은 값입니다. 화면과 맞는지 꼭 확인하세요. 직접 고치면 노란색이 사라집니다.</p>
   </header>
 
   <section>
@@ -228,7 +229,7 @@ input.ocr { outline: 3px solid #e0a800; background: rgba(224, 168, 0, .16) !impo
       <div class="f"><label for="nh3">NH3 (ppm)</label><input id="nh3" inputmode="decimal" autocomplete="off"></div>
       <div class="f"><label for="steam">공정증기 (t/h)</label><input id="steam" inputmode="decimal" autocomplete="off"></div>
     </div>
-    <p class="hint ocrnote" id="ocrNote" hidden>노란 칸은 운전상황 사진에서 읽은 값입니다. 화면과 맞는지 확인하세요. 직접 고치면 노란색이 사라집니다.</p>
+
   </section>
 
   <section>
@@ -356,7 +357,8 @@ input.ocr { outline: 3px solid #e0a800; background: rgba(224, 168, 0, .16) !impo
 
   <section>
     <h2>추가 사진 (운전상황 등)</h2>
-    <label class="chk"><input type="checkbox" id="wmOcr"> 운전상황 사진에서 NOx·NH3 자동으로 읽기</label>
+    <label class="chk"><input type="checkbox" id="wmOcr"> 요약 화면 사진에서 값 자동으로 읽기</label>
+    <p class="hint" style="margin:0 0 10px">DCS 요약 화면을 찍으면 대기온도·습도·대기압, GT·ST 출력과 괄호값, 역송량, NOx, NH3, Raw·Demi 탱크, CV 개도를 읽어서 메시지 입력 칸에 넣습니다. CFP, Normal Pond, Emer Pond, 공정증기, 날씨는 직접 입력하세요.</p>
     <div id="extras"></div>
     <p class="hint">사진을 찍거나 고르면 바로 자르기 화면이 열립니다. 자르지 않으려면 '취소'를 누르세요. 나중에 '다시 자르기'로 고칠 수 있습니다.</p>
   </section>
@@ -1039,7 +1041,7 @@ function setExtra(i, orig, f) {
 }
 
 
-/* ---------- 운전상황 사진에서 NOx·NH3 읽기 (폰 안에서 글자 읽기) ---------- */
+/* ---------- DCS 요약 화면 사진에서 값 읽기 ---------- */
 const TESS_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 let tessP = null, ocrQueue = Promise.resolve();
 function loadTess() {
@@ -1058,7 +1060,6 @@ function fileToCanvas(file, maxSide, minSide) {
     const url = URL.createObjectURL(file), im = new Image();
     im.onload = () => {
       const long = Math.max(im.naturalWidth, im.naturalHeight);
-      // 작은 사진은 키워서 읽는다 (글자가 너무 작으면 인식이 안 된다)
       const sc = Math.min(maxSide / long, Math.max(1, (minSide || 0) / long));
       const c = document.createElement("canvas"); c.width = Math.round(im.naturalWidth * sc); c.height = Math.round(im.naturalHeight * sc);
       c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
@@ -1068,128 +1069,350 @@ function fileToCanvas(file, maxSide, minSide) {
     im.src = url;
   });
 }
-// 숫자 상자만 잘라서 확대하고 흑백으로 바꾼다 (소수점이 잘 살아난다)
-function binCrop(src, bb, h) {
-  const pad = Math.max(4, Math.round(h * 0.4));
-  const x0 = Math.max(0, Math.floor(bb.x0 - pad)), y0 = Math.max(0, Math.floor(bb.y0 - pad));
-  const x1 = Math.min(src.width, Math.ceil(bb.x1 + pad)), y1 = Math.min(src.height, Math.ceil(bb.y1 + pad));
-  const w = Math.max(2, x1 - x0), hh = Math.max(2, y1 - y0), scale = Math.min(8, Math.max(2, 56 / Math.max(8, h)));
-  const c = document.createElement("canvas"); c.width = Math.round(w * scale); c.height = Math.round(hh * scale);
-  const x = c.getContext("2d"); x.imageSmoothingQuality = "high";
-  x.drawImage(src, x0, y0, w, hh, 0, 0, c.width, c.height);
-  const d = x.getImageData(0, 0, c.width, c.height), p = d.data, g = new Float32Array(p.length / 4);
-  let sum = 0;
-  for (let i = 0, j = 0; i < p.length; i += 4, j++) { g[j] = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2]; sum += g[j]; }
-  const th = sum / g.length * 0.78;
+const clampN = (v, a, b) => Math.max(a, Math.min(b, v));
+
+/* 기준 화면(1500x2000으로 찍은 사진)에서 잰 라벨 중심과 값 상자 위치 */
+const TPL = {
+  anchors: { temp: [543, 444], humidity: [503, 632], pressure: [516, 831], nox: [1198, 470], nh3: [1186, 638], gt: [253, 1010], st: [687, 1003], tl1: [1161, 1067], tl2: [1181, 1227], raw: [256, 1346], demi: [604, 1341], aic: [1083, 1461] },
+  boxes: {
+    temp: [440, 492, 545, 545], humidity: [442, 722, 548, 775], pressure: [446, 892, 552, 945],
+    nox: [1082, 524, 1184, 573], nh3: [1080, 721, 1185, 770],
+    gt: [150, 1065, 317, 1150], st: [612, 1060, 779, 1148], gtkw: [178, 1205, 285, 1257], stkw: [637, 1197, 740, 1248],
+    tl1: [1044, 1140, 1147, 1190], tl2: [1044, 1280, 1147, 1330], aic: [1047, 1503, 1147, 1551],
+    raw: [224, 1740, 330, 1792], demi: [565, 1741, 668, 1790]
+  }
+};
+const LABEL_RE = {
+  temp: /TEMPERATURE/, humidity: /HUMIDITY/, pressure: /PRESSURE/, nox: /STACKN[O0]X|FLUEGAS.*N[O0]X/, nh3: /NH[3S].*SLIP|SLIP/,
+  gt: /GTPOWER/, st: /STPOWER/, tl1: /1TL/, tl2: /2TL/, raw: /RAWWTR/, demi: /DWSTOR|STORTK/, aic: /INTAKE/
+};
+const OCR_RULES = {
+  temp: { min: -40, max: 60, dec: 1 }, humidity: { min: 0, max: 100, dec: 1 }, pressure: { min: 900, max: 1100 },
+  nox: { min: 0, max: 100, dec: 2 }, nh3: { min: 0, max: 50, dec: ds => ds.length === 2 ? ds[0] + "." + ds[1] : ds.length === 3 ? ds[0] + "." + ds.slice(1) : null },
+  gt: { min: 0, max: 700 }, st: { min: 0, max: 700 }, gtkw: { min: 0, max: 700000 }, stkw: { min: 0, max: 700000 },
+  tl1: { min: -500, max: 500 }, tl2: { min: -500, max: 500 }, aic: { min: 0, max: 100 },
+  raw: { min: 0, max: 60000 }, demi: { min: 0, max: 60000 }
+};
+const normLab = t => String(t).toUpperCase().replace(/[^A-Z0-9#]/g, "");
+
+// 라벨 위치들로 '기준 화면 → 사진' 변환(크기·회전·이동)을 구한다
+function fitSimilarity(pairs) {
+  const fit = ps => {
+    const n = ps.length, rc = [0, 0], oc = [0, 0];
+    ps.forEach(([r, o]) => { rc[0] += r[0] / n; rc[1] += r[1] / n; oc[0] += o[0] / n; oc[1] += o[1] / n; });
+    let num1 = 0, num2 = 0, den = 0;
+    ps.forEach(([r, o]) => {
+      const rx = r[0] - rc[0], ry = r[1] - rc[1], ox = o[0] - oc[0], oy = o[1] - oc[1];
+      num1 += rx * ox + ry * oy; num2 += rx * oy - ry * ox; den += rx * rx + ry * ry;
+    });
+    const a = num1 / den, b = num2 / den;
+    return { a, b, tx: oc[0] - (a * rc[0] - b * rc[1]), ty: oc[1] - (b * rc[0] + a * rc[1]) };
+  };
+  const ap = (T, p) => [T.a * p[0] - T.b * p[1] + T.tx, T.b * p[0] + T.a * p[1] + T.ty];
+  let ps = pairs.slice(), T = fit(ps);
+  for (let it = 0; it < 2 && ps.length > 3; it++) {
+    const res = ps.map(([r, o]) => { const q = ap(T, r); return Math.hypot(q[0] - o[0], q[1] - o[1]); });
+    const med = res.slice().sort((x, y) => x - y)[res.length >> 1], lim = Math.max(25, 3 * med);
+    const keep = ps.filter((_, i) => res[i] <= lim);
+    if (keep.length === ps.length || keep.length < 3) break;
+    ps = keep; T = fit(ps);
+  }
+  T.s = Math.hypot(T.a, T.b); T.n = ps.length; T.apply = p => ap(T, p);
+  return T;
+}
+
+// 예상 위치 주변의 작은 구역에서 흰 상자를 정확히 찾는다
+function refineBox(src, pr) {
+  const w = pr.x1 - pr.x0, h = pr.y1 - pr.y0, ex = 0.4;
+  const win = { x0: clampN(pr.x0 - ex * w, 0, src.width - 4), y0: clampN(pr.y0 - ex * h, 0, src.height - 4), x1: clampN(pr.x1 + ex * w, 4, src.width), y1: clampN(pr.y1 + ex * h, 4, src.height) };
+  const ww = win.x1 - win.x0, wh = win.y1 - win.y0, sc = Math.min(1, 260 / ww);
+  const sw = Math.max(8, Math.round(ww * sc)), sh = Math.max(8, Math.round(wh * sc));
+  const c = document.createElement("canvas"); c.width = sw; c.height = sh;
+  const cx = c.getContext("2d", { willReadFrequently: true });
+  cx.drawImage(src, win.x0, win.y0, ww, wh, 0, 0, sw, sh);
+  const px = cx.getImageData(0, 0, sw, sh).data, n = sw * sh, g = new Float32Array(n);
+  for (let i = 0, j = 0; i < px.length; i += 4, j++) g[j] = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+  const ring = [], core = [];
+  const rx0 = (pr.x0 - win.x0) * sc, rx1 = (pr.x1 - win.x0) * sc, ry0 = (pr.y0 - win.y0) * sc, ry1 = (pr.y1 - win.y0) * sc;
+  const mx = (rx1 - rx0) * 0.25, my = (ry1 - ry0) * 0.25;
+  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+    const v = g[y * sw + x];
+    if (x < sw * 0.12 || x >= sw * 0.88 || y < sh * 0.12 || y >= sh * 0.88) ring.push(v);
+    else if (x > rx0 + mx && x < rx1 - mx && y > ry0 + my && y < ry1 - my) core.push(v);
+  }
+  if (!ring.length || !core.length) return null;
+  ring.sort((p, q) => p - q); core.sort((p, q) => p - q);
+  const bg = ring[ring.length >> 1], bright = core[Math.floor(core.length * 0.8)];
+  if (bright - bg < 14) return null;
+  const thr = bg + 0.5 * (bright - bg);
+  let m = new Uint8Array(n);
+  for (let i = 0; i < n; i++) m[i] = g[i] > thr ? 1 : 0;
+  for (let it = 0; it < 2; it++) {                        // 숫자 획 때문에 생긴 구멍을 메운다
+    const t = new Uint8Array(m);
+    for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+      if (m[y * sw + x]) continue;
+      let hit = 0;
+      for (let dy = -1; dy <= 1 && !hit; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const yy = y + dy, xx = x + dx;
+        if (yy >= 0 && yy < sh && xx >= 0 && xx < sw && m[yy * sw + xx]) { hit = 1; break; }
+      }
+      t[y * sw + x] = hit;
+    }
+    m = t;
+  }
+  const seen = new Uint8Array(n); let best = null;
+  const pcx = (rx0 + rx1) / 2, pcy = (ry0 + ry1) / 2;
+  for (let s0 = 0; s0 < n; s0++) {
+    if (!m[s0] || seen[s0]) continue;
+    const st = [s0]; seen[s0] = 1;
+    let minx = sw, maxx = 0, miny = sh, maxy = 0, area = 0;
+    while (st.length) {
+      const p = st.pop(), x = p % sw, y = (p - x) / sw; area++;
+      if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+      if (x > 0 && m[p - 1] && !seen[p - 1]) { seen[p - 1] = 1; st.push(p - 1); }
+      if (x < sw - 1 && m[p + 1] && !seen[p + 1]) { seen[p + 1] = 1; st.push(p + 1); }
+      if (y > 0 && m[p - sw] && !seen[p - sw]) { seen[p - sw] = 1; st.push(p - sw); }
+      if (y < sh - 1 && m[p + sw] && !seen[p + sw]) { seen[p + sw] = 1; st.push(p + sw); }
+    }
+    const cw = maxx - minx + 1, ch = maxy - miny + 1;
+    const cxm = (minx + maxx) / 2, cym = (miny + maxy) / 2;
+    if (Math.abs(cxm - pcx) > (rx1 - rx0) * 0.6 || Math.abs(cym - pcy) > (ry1 - ry0) * 0.6) continue;
+    if (cw < (rx1 - rx0) * 0.55 || cw > (rx1 - rx0) * 1.6 || ch < (ry1 - ry0) * 0.55 || ch > (ry1 - ry0) * 1.6) continue;
+    if (!best || area > best.area) best = { area, minx, maxx, miny, maxy };
+  }
+  if (!best) return null;
+  const k = 1 / sc, d = 2 * k;                          // 팽창으로 커진 만큼 줄인다
+  return { x0: win.x0 + best.minx * k + d, x1: win.x0 + (best.maxx + 1) * k - d, y0: win.y0 + best.miny * k + d, y1: win.y0 + (best.maxy + 1) * k - d };
+}
+
+function otsu(g) {
+  const hist = new Array(256).fill(0); g.forEach(v => hist[Math.max(0, Math.min(255, Math.round(v)))]++);
+  const total = g.length; let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sB = 0, wB = 0, mx = 0, th = 127;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (!wB) continue; const wF = total - wB; if (!wF) break;
+    sB += t * hist[t]; const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+    if (v > mx) { mx = v; th = t; }
+  }
+  return th;
+}
+function boxCrop(src, bb, mult, insFrac) {
+  const h = bb.y1 - bb.y0, ins = Math.max(2, Math.round(h * (insFrac == null ? 0.1 : insFrac)));
+  const x0 = bb.x0 + ins, y0 = bb.y0 + ins, w = Math.max(4, bb.x1 - bb.x0 - 2 * ins), hh = Math.max(4, h - 2 * ins);
+  const scale = clampN(64 / hh * mult, 1.2, 8), mg = Math.round(hh * scale * 0.35);
+  const cw = Math.round(w * scale), ch = Math.round(hh * scale);
+  const c = document.createElement("canvas"); c.width = cw + 2 * mg; c.height = ch + 2 * mg;
+  const x = c.getContext("2d", { willReadFrequently: true }); x.imageSmoothingQuality = "high";
+  x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height);
+  x.drawImage(src, x0, y0, w, hh, mg, mg, cw, ch);
+  const d = x.getImageData(mg, mg, cw, ch), p = d.data, g = new Float32Array(cw * ch);
+  for (let i = 0, j = 0; i < p.length; i += 4, j++) g[j] = 0.299 * p[i] + 0.587 * p[i + 1] + 0.114 * p[i + 2];
+  const th = otsu(g);
   for (let i = 0, j = 0; i < p.length; i += 4, j++) { const v = g[j] < th ? 0 : 255; p[i] = p[i + 1] = p[i + 2] = v; }
-  x.putImageData(d, 0, 0);
+  x.putImageData(d, mg, mg);
+  // 상자 테두리(길게 이어진 가로·세로 선)를 지운다
+  const fx = x.getImageData(0, 0, c.width, c.height), q = fx.data, W2 = c.width, H2 = c.height;
+  const inX0 = mg, inX1 = W2 - mg, inY0 = mg, inY1 = H2 - mg;
+  for (let y = inY0; y < inY1; y++) {
+    let n = 0; for (let xx = inX0; xx < inX1; xx++) if (q[(y * W2 + xx) * 4] < 128) n++;
+    if (n > 0.7 * (inX1 - inX0)) for (let xx = 0; xx < W2; xx++) { const i = (y * W2 + xx) * 4; q[i] = q[i + 1] = q[i + 2] = 255; }
+  }
+  for (let xx = inX0; xx < inX1; xx++) {
+    let n = 0; for (let y = inY0; y < inY1; y++) if (q[(y * W2 + xx) * 4] < 128) n++;
+    if (n > 0.8 * (inY1 - inY0)) for (let y = 0; y < H2; y++) { const i = (y * W2 + xx) * 4; q[i] = q[i + 1] = q[i + 2] = 255; }
+  }
+  x.putImageData(fx, 0, 0);
   return c;
 }
-function parseVal(t) {
-  const s = String(t || "").replace(/[^0-9.]/g, "");
-  let m = s.match(/\d+\.\d+/);
-  if (m) return m[0];
-  if (/^\d{3,4}$/.test(s)) return s.slice(0, -2) + "." + s.slice(-2);   // 소수점이 빠진 경우: 값은 소수 둘째 자리까지 표시됨
-  return null;
-}
-// 사진 전체에서 'STACK … NOX (15% O2)' 줄과 'NH3 CONC (15% O2)' 줄을 찾고, 그 줄의 숫자 상자 위치를 돌려준다
-function findRows(words, W) {
-  const tol = Math.max(8, W * 0.007);
-  const yc = w => (w.bbox.y0 + w.bbox.y1) / 2;
-  const norm = w => String(w.text).toUpperCase().replace(/[^A-Z0-9%]/g, "");
-  const res = {};
-  words.filter(w => /15%/.test(w.text)).forEach(a => {
-    const row = words.filter(w => Math.abs(yc(w) - yc(a)) <= tol).sort((p, q) => p.bbox.x0 - q.bbox.x0);
-    const names = row.map(norm).join(" ");
-    let key = null;
-    if (/STACK/.test(names) && /N[O0]X/.test(names) && !/SCR|INLET|OUTLET/.test(names)) key = "nox";
-    else if (/NH[3S]/.test(names) && /CONC/.test(names)) key = "nh3";
-    if (!key || res[key]) return;
-    const o2 = row.find(w => w.bbox.x0 > a.bbox.x0 && /^(O2|02|OZ|0Z)\)?$/i.test(String(w.text).replace(/[^A-Za-z0-9)]/g, "")));
-    const labelEnd = (o2 || a).bbox.x1;
-    const cand = row.find(w => w.bbox.x0 >= labelEnd - 2 && /^[\[(]?\d+(\.\d+)?[\])]?$/.test(String(w.text).trim()));
-    const hs = row.map(w => w.bbox.y1 - w.bbox.y0).sort((p, q) => p - q);
-    const h = Math.max(10, hs[Math.floor(hs.length / 2)] || 12);
-    const bb = cand ? cand.bbox : { x0: labelEnd + W * 0.004, x1: labelEnd + W * 0.04, y0: yc(a) - h, y1: yc(a) + h };
-    res[key] = { bb, h: cand ? cand.bbox.y1 - cand.bbox.y0 : h, cand: cand ? parseVal(cand.text) : null };
-  });
-  return res;
-}
-async function readBox(worker, src, bb, h, candVal, k) {
-  await worker.setParameters({ tessedit_pageseg_mode: "7", tessedit_char_whitelist: "0123456789." });
-  const box = { x0: bb.x0 * k, y0: bb.y0 * k, x1: bb.x1 * k, y1: bb.y1 * k }, hh = Math.max(8, h * k);
-  const vals = [];
-  for (const m of [1, 0.7, 1.4]) {
-    const { data } = await worker.recognize(binCrop(src, box, hh * m));
-    const v = parseVal(data.text); if (v) vals.push(v);
+// 흑백 이미지에서 글자 덩어리를 세어 숫자·소수점·음수 기호의 모양과 위치를 알아낸다
+function glyphTokens(c) {
+  const ctx = c.getContext("2d", { willReadFrequently: true }), W2 = c.width, H2 = c.height;
+  const d = ctx.getImageData(0, 0, W2, H2).data;
+  const dark = (x, y) => d[(y * W2 + x) * 4] < 128;
+  const runs = []; let start = -1;
+  for (let x = 0; x <= W2; x++) {
+    let any = false;
+    if (x < W2) for (let y = 0; y < H2; y++) if (dark(x, y)) { any = true; break; }
+    if (any && start < 0) start = x;
+    if (!any && start >= 0) { runs.push([start, x - 1]); start = -1; }
   }
-  window.__ocrDebug = (window.__ocrDebug || []).concat([{ vals, candVal, hh: Math.round(hh) }]);
-  if (!vals.length) return null;
-  const count = {}; vals.forEach(v => { count[v] = (count[v] || 0) + 1; });
-  const best = Object.keys(count).sort((a, b) => count[b] - count[a])[0];
-  // 세 번 중 두 번 이상 같고, 사진 전체에서 읽은 값과도 맞을 때만 '확실'로 본다
-  const sure = count[best] >= 2 && (!candVal || candVal === best) && hh >= 9;
-  return { v: best, sure };
+  const blobs = runs.map(([a, b]) => {
+    let y0 = H2, y1 = -1;
+    for (let x = a; x <= b; x++) for (let y = 0; y < H2; y++) if (dark(x, y)) { if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    return { x0: a, x1: b, y0, y1, w: b - a + 1, h: y1 - y0 + 1 };
+  }).filter(b => b.h >= 2);
+  if (!blobs.length) return [];
+  const maxH = Math.max(...blobs.map(b => b.h)), bottom = Math.max(...blobs.filter(b => b.h > 0.6 * maxH).map(b => b.y1));
+  const top = Math.min(...blobs.filter(b => b.h > 0.6 * maxH).map(b => b.y0)), band = Math.max(1, bottom - top);
+  const toks = [];
+  const wide = blobs.filter(b => b.h >= 0.55 * maxH && b.w >= 0.2 * b.h).map(b => b.h).sort((p, q) => p - q);
+  const digH = wide.length ? wide[wide.length >> 1] : maxH;
+  blobs.forEach(b => {
+    if (b.h >= 0.55 * maxH) {
+      // 가장자리의 가는 세로선이 숫자보다 훨씬 길면 테두리, 아니면 숫자 '1'
+      if (b.w < 0.12 * b.h && (b.x0 < 0.18 * W2 || b.x1 > 0.82 * W2) && b.h > 1.25 * digH) return;
+      toks.push({ t: "D", x: (b.x0 + b.x1) / 2 });
+    } else if (b.h <= 0.32 * maxH) {
+      const cy = (b.y0 + b.y1) / 2;
+      if (b.w >= 1.4 * b.h && b.w >= 0.18 * band && cy > top + 0.3 * band && cy < bottom - 0.12 * band) toks.push({ t: "-", x: (b.x0 + b.x1) / 2 });
+      else if (b.w <= 2.2 * b.h && b.y1 >= bottom - 0.28 * band) toks.push({ t: ".", x: (b.x0 + b.x1) / 2 });
+    }
+  });
+  return toks.sort((p, q) => p.x - q.x).map(t => t.t);
 }
-async function readEmissionOnce(worker, file, minSide) {
-  const ocrC = await fileToCanvas(file, 2400, minSide), srcC = await fileToCanvas(file, 4000, minSide);
+function parseNumStr(t) {
+  let s = String(t || "").replace(/\s+/g, "").replace(/[^0-9.\-]/g, "");
+  s = s.replace(/(?!^)-/g, "").replace(/^\.+/, "").replace(/\.+$/, "");
+  const m = s.match(/^-?\d+(\.\d+)?$/);
+  return m ? m[0] : null;
+}
+// 숫자는 글자 읽기로, 소수점·음수 기호는 모양(작은 점, 짧은 막대)으로 정한다
+async function readBoxNum(worker, src, bb, rule) {
+  await worker.setParameters({ tessedit_pageseg_mode: "7", tessedit_char_whitelist: "0123456789" });
+  const reads = [], toks = [];
+  for (const [mult, ins] of [[1, 0.03], [1, 0.06], [0.8, 0.1], [1.2, 0.02], [1, 0.14], [0.9, 0.04]]) {
+    const c = boxCrop(src, bb, mult, ins), tk = glyphTokens(c), nd = tk.filter(t => t === "D").length;
+    const { data } = await worker.recognize(c);
+    const ds = String(data.text || "").replace(/\D/g, "");
+    toks.push(tk.join(""));
+    if (!ds || ds.length < nd) { reads.push(null); continue; }       // 읽은 숫자가 덩어리 수보다 적으면 버린다 (붙은 숫자는 덩어리가 줄어들 수 있음)
+    reads.push({ ds, neg: tk[0] === "-" });
+  }
+  // 숫자열(부호 포함)로 투표한다. 소수점은 읽지 않고 이 화면의 고정된 자릿수로 정한다
+  const cnt = {};
+  reads.filter(Boolean).forEach(r => { const k = (r.neg ? "-" : "") + r.ds; cnt[k] = (cnt[k] || 0) + 1; });
+  const keys = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]);
+  const best = keys[0]; if (!best) return { reads, toks, v: null, sure: false };
+  const valid = reads.filter(Boolean).length, top = cnt[best], second = keys[1] ? cnt[keys[1]] : 0;
+  const neg = best[0] === "-", ds = neg ? best.slice(1) : best;
+  let v = ds;
+  if (rule.dec != null) {
+    if (typeof rule.dec === "function") v = rule.dec(ds); else if (ds.length > rule.dec) v = ds.slice(0, ds.length - rule.dec) + "." + ds.slice(ds.length - rule.dec);
+    else v = null;
+  }
+  if (v == null) return { reads, toks, v: ds, sure: false };
+  if (neg) v = "-" + v;
+  const n = Number(v);
+  const inRange = n >= rule.min && n <= rule.max;
+  // 충돌하는 읽기가 없으면 2번 일치로 충분하고, 충돌이 있으면 3번 이상 앞서야 한다
+  const agree = second === 0 ? top >= 2 : (top >= 3 && top > second && top >= 0.5 * valid);
+  return { reads, toks, v, cnt, sure: agree && inRange };
+}
+
+async function readSummary(file, dbg) {
+  const worker = await loadTess();
+  const ocrC = await fileToCanvas(file, 2400, 0), srcC = await fileToCanvas(file, 4000, 0);
   const k = srcC.width / ocrC.width;
   await worker.setParameters({ tessedit_pageseg_mode: "11", tessedit_char_whitelist: "" });
   const { data } = await worker.recognize(ocrC, {}, { blocks: true });
-  const rows = findRows(data.words || [], ocrC.width);
-  const out = {}, lim = { nox: 100, nh3: 50 };
-  for (const key of ["nox", "nh3"]) {
-    const r = rows[key]; if (!r) continue;
-    const rd = await readBox(worker, srcC, r.bb, r.h, r.cand, k);
-    if (rd && Number(rd.v) > 0 && Number(rd.v) < lim[key]) out[key] = rd;
-    else out[key] = { v: (rd && rd.v) || r.cand || null, sure: false };   // 줄은 찾았지만 값이 불확실
+  const lines = (data.lines || []).map(l => ({ t: normLab(l.text), b: { x0: l.bbox.x0 * k, y0: l.bbox.y0 * k, x1: l.bbox.x1 * k, y1: l.bbox.y1 * k } }));
+  const pairs = [], foundKeys = [];
+  for (const key of Object.keys(LABEL_RE)) {
+    const ln = lines.filter(l => LABEL_RE[key].test(l.t)).sort((p, q) => (q.b.x1 - q.b.x0) - (p.b.x1 - p.b.x0))[0];
+    if (ln) { pairs.push([TPL.anchors[key], [(ln.b.x0 + ln.b.x1) / 2, (ln.b.y0 + ln.b.y1) / 2]]); foundKeys.push(key); }
+  }
+  if (dbg) dbg.foundKeys = foundKeys;
+  if (pairs.length < 3) return { _err: "labels", found: foundKeys.length };
+  const T = fitSimilarity(pairs);
+  if (dbg) dbg.T = { s: T.s, a: T.a, b: T.b, tx: T.tx, ty: T.ty, n: T.n };
+  const out = {}, pred = {}, refined = {};
+  const jobs = [];
+  for (const key of Object.keys(TPL.boxes)) {
+    const [x0, y0, x1, y1] = TPL.boxes[key];
+    const c = T.apply([(x0 + x1) / 2, (y0 + y1) / 2]), hw = (x1 - x0) / 2 * T.s, hh = (y1 - y0) / 2 * T.s;
+    const pr = { x0: c[0] - hw, x1: c[0] + hw, y0: c[1] - hh, y1: c[1] + hh };
+    pred[key] = pr;
+    let rb = refineBox(srcC, pr);
+    // 정밀 탐색 결과가 예상 크기와 너무 다르면 믿지 않는다
+    if (rb) {
+      const rw = (rb.x1 - rb.x0) / (hw * 2), rh = (rb.y1 - rb.y0) / (hh * 2);
+      if (rw < 0.85 || rw > 1.2 || rh < 0.85 || rh > 1.2) rb = null;
+    }
+    refined[key] = rb;
+    jobs.push([key, rb || { x0: pr.x0 - hw * 0.04, x1: pr.x1 + hw * 0.04, y0: pr.y0 - hh * 0.04, y1: pr.y1 + hh * 0.04 }, !!rb]);
+  }
+  if (dbg) { dbg.pred = pred; dbg.refined = refined; }
+  if (dbg && dbg.boxesOnly) return out;
+  for (const [key, bb, ok] of jobs) {
+    const r = await readBoxNum(worker, srcC, bb, OCR_RULES[key]);
+    r.refined = ok;
+    out[key] = r;
+  }
+  // kW 값은 같은 출력(MW)보다 조금 작아야 한다 (약 0.90~1.00배). 아니면 믿지 않는다
+  for (const [mw, kw] of [["gt", "gtkw"], ["st", "stkw"]]) {
+    const a = out[mw], b = out[kw]; if (!a || !b || !a.v) continue;
+    // 투표가 갈리면(예: 181346 / 381346), 출력과 비율이 맞는 후보가 하나뿐일 때 그것을 쓴다
+    const cands = Object.keys(b.cnt || {}).filter(c => { const r = (Number(c) / 1000) / Number(a.v); return r >= 0.85 && r <= 1.05; });
+    if (a.sure && cands.length === 1 && b.cnt[cands[0]] >= 2) { b.v = cands[0]; b.sure = true; }
+    if (!b.v) continue;
+    const ratio = (Number(b.v) / 1000) / Number(a.v);
+    b.ratio = ratio;
+    if (!(ratio >= 0.85 && ratio <= 1.05)) b.sure = false;
+    else if (!a.sure) b.sure = false;
   }
   return out;
 }
-// 먼저 그대로 읽고, 확실하지 않은 값만 사진을 키워서 한 번 더 읽는다
-async function readEmission(file) {
-  const worker = await loadTess();
-  const best = {};
-  for (const minSide of [0, 2400]) {
-    const part = await readEmissionOnce(worker, file, minSide);
-    for (const key of ["nox", "nh3"]) {
-      const r = part[key]; if (!r) continue;
-      if (!best[key] || (r.sure && !best[key].sure)) best[key] = r;
-    }
-    if (best.nox && best.nox.sure && best.nh3 && best.nh3.sure) break;
-  }
-  return best;
-}
+
+
+// 읽은 값 → 메시지 입력 칸 연결표
+const OCR_FIELDS = [
+  { f: "temp", k: "temp", name: "대기온도" }, { f: "humidity", k: "humidity", name: "습도" }, { f: "pressure", k: "pressure", name: "대기압" },
+  { f: "gt", k: "gt", name: "GT" }, { f: "gt2", k: "gtkw", name: "GT 괄호값", conv: v => String(Math.round(Number(v) / 1000)) },
+  { f: "st", k: "st", name: "ST" }, { f: "st2", k: "stkw", name: "ST 괄호값", conv: v => String(Math.round(Number(v) / 1000)) },
+  { f: "nox", k: "nox", name: "NOx" }, { f: "nh3", k: "nh3", name: "NH3" },
+  { f: "raw", k: "raw", name: "Raw TK" }, { f: "demi", k: "demi", name: "Demi TK" },
+  { f: "aic", k: "aic", name: "CV 개도", conv: v => (Number(v) <= 2 ? "Close" : String(Number(v))) }
+];
+const OCR_IDS = OCR_FIELDS.map(x => x.f).concat(["reverse"]);
 function fillField(id, v) {
   const el = $(id); el.value = v; el.classList.add("ocr");
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
-["nox", "nh3"].forEach(id => $(id).addEventListener("input", e => {
+function ocrNoteUpdate() {
+  $("ocrNote").hidden = !OCR_IDS.some(id => $(id).classList.contains("ocr"));
+}
+OCR_IDS.forEach(id => $(id).addEventListener("input", e => {
   if (!e.isTrusted) return;
-  $(id).classList.remove("ocr");
-  if (!$("nox").classList.contains("ocr") && !$("nh3").classList.contains("ocr")) $("ocrNote").hidden = true;
+  $(id).classList.remove("ocr"); ocrNoteUpdate();
 }));
+function applyReading(res) {
+  const got = [], maybe = [];
+  OCR_FIELDS.forEach(m => {
+    const r = res[m.k]; if (!r || r.v == null) return;
+    const shown = m.conv ? m.conv(r.v) : r.v;
+    if (r.sure) { fillField(m.f, shown); got.push(m.name + " " + shown); }
+    else maybe.push(m.name + " " + shown + "?");
+  });
+  // 역송량: #1TL + #2TL. 합이 0 이하(음수)이면 0, 양수이면 그 값
+  const a = res.tl1, b = res.tl2;
+  if (a && b && a.v != null && b.v != null) {
+    const sum = Number(a.v) + Number(b.v);
+    if (a.sure && b.sure) { const v = sum > 0 ? String(sum) : "0"; fillField("reverse", v); got.push("역송량 " + v); }
+    else maybe.push("역송량(#1TL " + a.v + ", #2TL " + b.v + ")?");
+  } else if (a || b) maybe.push("역송량(한쪽만 읽힘)?");
+  ocrNoteUpdate();
+  return { got, maybe };
+}
 async function scanExtra(i) {
   if (!WM.get().ocr) return;
   const x = extras[i]; if (!x.file) return;
   const file = x.file, orig = x.orig, st = $("xo" + i);
-  st.className = "hint"; st.textContent = "NOx·NH3 읽는 중… (처음에는 1~2분 걸릴 수 있습니다)";
+  st.className = "hint"; st.textContent = "사진에서 값 읽는 중… (처음에는 1~2분 걸릴 수 있습니다)";
   ocrQueue = ocrQueue.then(async () => {
     try {
-      let res = await readEmission(file);
-      if (!res.nox && !res.nh3 && orig && orig !== file) res = await readEmission(orig);
+      let res = await readSummary(file);
+      if (res._err && orig && orig !== file) res = await readSummary(orig);
       if (extras[i].file !== file) return;                    // 그 사이에 사진이 바뀌었으면 무시
-      const parts = [], maybe = [];
-      [["nox", "NOx"], ["nh3", "NH3"]].forEach(([key, name]) => {
-        const r = res[key]; if (!r) return;
-        if (r.sure) { fillField(key, r.v); parts.push(name + " " + r.v); }
-        else maybe.push(name + " " + (r.v || "읽지 못함"));
-      });
+      if (res._err) { st.className = "hint"; st.textContent = "값을 읽는 요약 화면이 아니라서 읽지 않았습니다."; return; }
+      const { got, maybe } = applyReading(res);
       let msg = "";
-      if (parts.length) { msg += "읽음: " + parts.join(" · ") + " → 메시지 입력 탭에 넣었습니다. 화면과 맞는지 꼭 확인하세요."; $("ocrNote").hidden = false; }
-      if (maybe.length) msg += (msg ? " " : "") + "자신이 없어 넣지 않은 값: " + maybe.join(" · ") + " (화면을 보고 직접 입력하세요. 더 가까이, 밝게 찍으면 잘 읽힙니다)";
-      if (!msg) msg = "이 사진에서 NOx·NH3 줄을 찾지 못했습니다. 직접 입력해 주세요.";
-      st.className = "hint " + (parts.length ? "ok" : "warn"); st.textContent = msg;
+      if (got.length) msg += `읽어서 넣은 값 ${got.length}개: ` + got.join(" · ") + " → 메시지 입력 탭의 노란 칸을 화면과 맞는지 확인하세요.";
+      if (maybe.length) msg += (msg ? " " : "") + "자신이 없어 넣지 않은 값: " + maybe.join(" · ") + " (직접 입력하세요)";
+      const none = OCR_FIELDS.filter(m => !res[m.k] || res[m.k].v == null).map(m => m.name);
+      if (!res.tl1 || !res.tl2 || res.tl1.v == null || res.tl2.v == null) none.push("역송량");
+      if (none.length && got.length) msg += " 읽지 못한 값: " + none.join(" · ") + " (직접 입력하세요)";
+      if (!msg) msg = "화면은 찾았지만 값을 읽지 못했습니다. 더 가까이, 밝게 찍어 주세요.";
+      st.className = "hint " + (got.length ? "ok" : "warn"); st.textContent = msg;
     } catch (e) {
       st.className = "hint warn"; st.textContent = "글자 읽기에 실패했습니다. 인터넷 연결을 확인하거나 직접 입력해 주세요.";
     }
@@ -1197,9 +1420,10 @@ async function scanExtra(i) {
 }
 document.addEventListener("tabshow", e => {
   if (e.detail !== "msg") return;
-  ["nox", "nh3"].forEach(id => { if (!$(id).value) $(id).classList.remove("ocr"); });
-  if (!$("nox").classList.contains("ocr") && !$("nh3").classList.contains("ocr")) $("ocrNote").hidden = true;
+  OCR_IDS.forEach(id => { if (!$(id).value) $(id).classList.remove("ocr"); });
+  ocrNoteUpdate();
 });
+
 
 /* ---------- 추가 사진 자르기 창 ---------- */
 const CR = { src: null, view: null, crop: null, drag: null, done: null, k: 1, name: "" };

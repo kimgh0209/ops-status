@@ -91,6 +91,7 @@ button, .filebtn {
   background: var(--bg); color: var(--fg); cursor: pointer;
 }
 button.main, .filebtn.main { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 700; }
+button:disabled { opacity: .5; }
 button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .preset button { flex: 1; font-weight: 700; }
 .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
@@ -106,6 +107,12 @@ canvas.move { touch-action: none; cursor: grab; }
 .warn { color: var(--warn); }
 #result img { width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
 input[type=file] { display: none; }
+.slot { display: flex; flex-direction: column; gap: 8px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.slot:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+.slothead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.thumb { width: 100%; max-height: 240px; object-fit: contain; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
+.packrow { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.packrow:last-child { border-bottom: 0; }
 
 
 /* 큰 글씨 */
@@ -119,7 +126,8 @@ input, textarea, input[type=text] { font-size: 21px; padding: 12px 10px; }
 textarea { font-size: 19px; }
 button, .filebtn { font-size: 18px; padding: 14px 16px; }
 button.main, .filebtn.main { font-size: 19px; }
-.tabs button { font-size: 19px; }
+.tabs button { font-size: 17px; padding: 14px 4px; }
+.thumb { max-height: 280px; }
 .chip { font-size: 17px; padding: 9px 15px; }
 .calc { font-size: 17px; }
 .warn, .toast { font-size: 17px; }
@@ -144,6 +152,7 @@ pre#out { font-size: 18px; }
   <div class="tabs" role="group" aria-label="기능 선택">
     <button type="button" data-tab="msg" aria-pressed="true">메시지 입력</button>
     <button type="button" data-tab="trend" aria-pressed="false">트렌드 사진</button>
+    <button type="button" data-tab="pack" aria-pressed="false">사진 모으기</button>
   </div>
 </div>
 
@@ -233,10 +242,19 @@ pre#out { font-size: 18px; }
   <section>
     <h2>1. 트렌드 사진</h2>
     <div class="btns">
-      <label class="filebtn main" for="file">사진 선택</label>
+      <label class="filebtn main" for="fileCam">사진 찍기</label>
+      <label class="filebtn" for="file">앨범에서 선택</label>
+      <input type="file" id="fileCam" accept="image/*" capture="environment">
       <input type="file" id="file" accept="image/*">
     </div>
     <p class="hint" id="fileHint">사진을 선택하면 아래 미리보기에 나타납니다.</p>
+    <div class="btns" id="editBtns" style="margin-top:8px" hidden>
+      <button type="button" id="cropBtn">자르기</button>
+      <button type="button" class="main" id="cropApply" hidden>자르기 적용</button>
+      <button type="button" id="cropCancel" hidden>취소</button>
+      <button type="button" id="rotBtn">90° 회전</button>
+      <button type="button" id="resetBtn">원본으로</button>
+    </div>
   </section>
 
   <section>
@@ -276,10 +294,35 @@ pre#out { font-size: 18px; }
     <h2>5. 완성 이미지</h2>
     <img id="resultImg" alt="글자가 들어간 트렌드 사진">
     <div class="btns" style="margin-top:10px">
-      <button type="button" class="main" id="save">사진 보관함에 저장</button>
-      <button type="button" class="main" id="saveBoth" hidden>트렌드 1·2 한꺼번에 저장</button>
+      <button type="button" class="main" id="save">이 사진만 보관함에 저장</button>
     </div>
     <p class="hint" id="saveHint"></p>
+    <p class="hint">카톡으로 여러 장을 한꺼번에 보내려면 '사진 모으기' 탭에서 저장하세요.</p>
+  </section>
+</div>
+
+</div>
+<div id="panel-pack" hidden>
+
+<div class="wrap">
+  <header>
+    <p class="sub">카톡으로 한꺼번에 보낼 사진을 모아서 사진 보관함에 한 번에 저장합니다. 저장하면 파일 이름 앞의 번호 순서대로 저장됩니다.</p>
+  </header>
+
+  <section>
+    <h2>보낼 사진 순서</h2>
+    <div id="packList"></div>
+  </section>
+
+  <section>
+    <h2>추가 사진 (운전상황 등)</h2>
+    <div id="extras"></div>
+    <p class="hint">추가 사진은 크기를 바꾸지 않고 찍은 그대로 저장합니다.</p>
+  </section>
+
+  <section>
+    <div class="btns"><button type="button" class="main" id="packSave">사진 한꺼번에 저장</button></div>
+    <p class="hint" id="packHint"></p>
   </section>
 </div>
 </div>
@@ -400,13 +443,14 @@ const DEFAULT_LABELS = [
 ];
 const EMPTY_HINT = "사진을 선택하면 아래 미리보기에 나타납니다.";
 
-let img = null, W = 0, H = 0;
+let img = null, orig = null, W = 0, H = 0;
 let blocks = [];            // {lines:[], x, y, w, h}
 let color = "#1a3fb0", moveMode = false, drag = null, showBoxes = true;
+let cropMode = false, crop = null, cdrag = null;
 let cur = 0;                // 현재 트렌드 종류 (0, 1)
 let blobCache = null;
 const rows = [...Array(NROWS).keys()];
-const S = [0, 1].map(() => ({ img: null, W: 0, H: 0, blocks: [], nums: rows.map(() => ["", ""]), memo: "", hint: EMPTY_HINT, hintCls: "hint", stage: "사진을 선택해 주세요." }));
+const S = [0, 1].map(() => ({ img: null, orig: null, W: 0, H: 0, blocks: [], nums: rows.map(() => ["", ""]), memo: "", hint: EMPTY_HINT, hintCls: "hint", stage: "사진을 선택해 주세요." }));
 
 /* ---------- 저장된 설정 ---------- */
 let pref = {};
@@ -445,13 +489,14 @@ function textBlocks() {
 /* ---------- 트렌드 종류 전환 ---------- */
 function saveCur() {
   const s = S[cur];
-  s.img = img; s.W = W; s.H = H; s.blocks = blocks;
+  s.img = img; s.orig = orig; s.W = W; s.H = H; s.blocks = blocks;
   s.memo = $("memo").value; s.nums = rows.map(i => [$("a"+i).value, $("b"+i).value]);
   s.hint = $("fileHint").textContent; s.hintCls = $("fileHint").className; s.stage = $("stageHint").textContent;
 }
 function loadCur() {
   const s = S[cur];
-  img = s.img; W = s.W; H = s.H; blocks = s.blocks;
+  cropMode = false; crop = null;
+  img = s.img; orig = s.orig; W = s.W; H = s.H; blocks = s.blocks;
   rows.forEach(i => {
     $("l"+i).value = labels[cur][i][0]; $("u"+i).value = labels[cur][i][1];
     $("a"+i).value = s.nums[i][0]; $("b"+i).value = s.nums[i][1];
@@ -459,10 +504,11 @@ function loadCur() {
   $("memo").value = s.memo;
   $("fileHint").textContent = s.hint; $("fileHint").className = s.hintCls;
   $("stageHint").textContent = s.stage; $("stageHint").className = "hint";
-  $("file").value = ""; $("result").hidden = true; blobCache = null;
+  $("file").value = ""; $("fileCam").value = ""; $("result").hidden = true; blobCache = null;
   const cv = $("cv");
   if (img) { cv.width = W; cv.height = H; draw(); }
   else { cv.width = 800; cv.height = 560; const x = cv.getContext("2d"); x.clearRect(0, 0, 800, 560); }
+  setCropUI();
   document.querySelectorAll(".preset button").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.p) === cur)));
   $("presetHint").textContent = `트렌드 ${cur+1}: ` + labels[cur].map(x => x[0]).filter(Boolean).join(" · ");
 }
@@ -533,10 +579,23 @@ function autoPlace() {
 }
 
 /* ---------- 그리기 ---------- */
+function handleR() { return Math.max(22, W / 40); }
 function draw(boxes = showBoxes) {
   const cv = $("cv"), ctx = cv.getContext("2d");
   if (!img) return;
   ctx.drawImage(img, 0, 0, W, H);
+  if (cropMode && crop) {
+    const c = crop, r = handleR();
+    ctx.fillStyle = "rgba(0,0,0,.5)";
+    ctx.fillRect(0, 0, W, c.y); ctx.fillRect(0, c.y + c.h, W, H - c.y - c.h);
+    ctx.fillRect(0, c.y, c.x, c.h); ctx.fillRect(c.x + c.w, c.y, W - c.x - c.w, c.h);
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(3, W / 500); ctx.strokeRect(c.x, c.y, c.w, c.h);
+    [[c.x, c.y], [c.x + c.w, c.y], [c.x, c.y + c.h], [c.x + c.w, c.y + c.h]].forEach(([x, y]) => {
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = "#ffffff"; ctx.fill();
+      ctx.lineWidth = Math.max(3, W / 500); ctx.strokeStyle = "#1f5f8b"; ctx.stroke();
+    });
+    return;
+  }
   const fs = fontPx();
   ctx.font = `${fs}px ${FONT}`; ctx.textBaseline = "top"; ctx.fillStyle = color;
   blocks.forEach(b => {
@@ -548,7 +607,7 @@ function draw(boxes = showBoxes) {
   });
 }
 function refresh(replace) {
-  if (!img) return;
+  if (!img || cropMode) return;
   const lists = textBlocks();
   const same = lists.length === blocks.length;
   if (replace || !same) { autoPlace(); return; }
@@ -567,19 +626,60 @@ async function loadFromSrc(src, name) {
     W = Math.round(im.naturalWidth * scale); H = Math.round(im.naturalHeight * scale);
     const c = document.createElement("canvas"); c.width = W; c.height = H;
     c.getContext("2d").drawImage(im, 0, 0, W, H);
-    img = c;
+    img = c; orig = c; cropMode = false; crop = null;
     const cv = $("cv"); cv.width = W; cv.height = H;
     $("fileHint").textContent = (name ? name + " · " : "") + `${W}×${H}`;
     $("fileHint").className = "hint ok";
+    setCropUI();
     autoPlace();
   };
   im.onerror = () => { $("fileHint").textContent = "사진을 열 수 없습니다. 다른 사진으로 시도해 주세요."; $("fileHint").className = "hint warn"; };
   im.src = src;
 }
-$("file").addEventListener("change", e => {
+["file", "fileCam"].forEach(id => $(id).addEventListener("change", e => {
   const f = e.target.files && e.target.files[0]; if (!f) return;
   const url = URL.createObjectURL(f);
+  e.target.value = "";
   loadFromSrc(url, f.name);
+}));
+
+/* ---------- 자르기 · 회전 ---------- */
+function setCropUI() {
+  $("editBtns").hidden = !img;
+  $("cropBtn").hidden = cropMode; $("rotBtn").hidden = cropMode; $("resetBtn").hidden = cropMode;
+  $("cropApply").hidden = !cropMode; $("cropCancel").hidden = !cropMode;
+  $("cv").classList.toggle("move", moveMode || cropMode);
+}
+$("cropBtn").addEventListener("click", () => {
+  if (!img) return;
+  cropMode = true;
+  const mx = W * 0.05, my = H * 0.05;
+  crop = { x: mx, y: my, w: W - 2 * mx, h: H - 2 * my };
+  setCropUI();
+  $("stageHint").className = "hint";
+  $("stageHint").textContent = "사진 위의 네 모서리 동그라미를 끌어서 남길 부분을 맞춘 뒤 '자르기 적용'을 누르세요. 안쪽을 끌면 영역 전체가 움직입니다.";
+  draw();
+});
+$("cropCancel").addEventListener("click", () => { cropMode = false; crop = null; setCropUI(); autoPlaceOrDraw(); });
+$("cropApply").addEventListener("click", () => {
+  if (!cropMode || !crop) return;
+  const c = document.createElement("canvas"); c.width = Math.round(crop.w); c.height = Math.round(crop.h);
+  c.getContext("2d").drawImage(img, crop.x, crop.y, crop.w, crop.h, 0, 0, c.width, c.height);
+  img = c; W = c.width; H = c.height; $("cv").width = W; $("cv").height = H;
+  cropMode = false; crop = null; setCropUI(); autoPlace();
+});
+function autoPlaceOrDraw() { if (blocks.length) { draw(); $("stageHint").textContent = "취소했습니다."; } else autoPlace(); }
+$("rotBtn").addEventListener("click", () => {
+  if (!img || cropMode) return;
+  const c = document.createElement("canvas"); c.width = H; c.height = W;
+  const x = c.getContext("2d"); x.translate(H, 0); x.rotate(Math.PI / 2); x.drawImage(img, 0, 0);
+  img = c; const t = W; W = H; H = t; $("cv").width = W; $("cv").height = H;
+  autoPlace();
+});
+$("resetBtn").addEventListener("click", () => {
+  if (!orig || cropMode) return;
+  img = orig; W = orig.width; H = orig.height; $("cv").width = W; $("cv").height = H;
+  autoPlace();
 });
 
 /* ---------- 입력 반응 ---------- */
@@ -591,16 +691,42 @@ $("moveToggle").addEventListener("click", () => {
   moveMode = !moveMode;
   $("moveToggle").setAttribute("aria-pressed", String(moveMode));
   $("moveToggle").textContent = "손가락으로 글씨 옮기기: " + (moveMode ? "켜짐" : "꺼짐");
-  $("cv").classList.toggle("move", moveMode);
+  setCropUI();
   draw();
 });
 
-/* ---------- 드래그 이동 ---------- */
+/* ---------- 드래그 (글씨 이동 / 자르기 영역) ---------- */
 function pos(e) {
   const r = $("cv").getBoundingClientRect();
   return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
 }
+function cropDown(e) {
+  const p = pos(e), c = crop, r = handleR() * 1.8;
+  const corners = [["l", "t", c.x, c.y], ["r", "t", c.x + c.w, c.y], ["l", "b", c.x, c.y + c.h], ["r", "b", c.x + c.w, c.y + c.h]];
+  let hit = null, bd = Infinity;
+  corners.forEach(([hx, hy, x, y]) => { const d = Math.hypot(p.x - x, p.y - y); if (d < r && d < bd) { bd = d; hit = { hx, hy }; } });
+  if (hit) cdrag = { type: "corner", hx: hit.hx, hy: hit.hy };
+  else if (p.x > c.x && p.x < c.x + c.w && p.y > c.y && p.y < c.y + c.h) cdrag = { type: "move", dx: p.x - c.x, dy: p.y - c.y };
+  else return;
+  try { $("cv").setPointerCapture(e.pointerId); } catch (err) {}
+  e.preventDefault();
+}
+function cropMove(e) {
+  const p = pos(e), c = crop, min = Math.min(W, H) * 0.12;
+  const px = Math.min(Math.max(p.x, 0), W), py = Math.min(Math.max(p.y, 0), H);
+  if (cdrag.type === "move") {
+    c.x = Math.min(Math.max(0, p.x - cdrag.dx), W - c.w);
+    c.y = Math.min(Math.max(0, p.y - cdrag.dy), H - c.h);
+  } else {
+    if (cdrag.hx === "l") { const nx = Math.min(px, c.x + c.w - min); c.w += c.x - nx; c.x = nx; }
+    else c.w = Math.max(min, px - c.x);
+    if (cdrag.hy === "t") { const ny = Math.min(py, c.y + c.h - min); c.h += c.y - ny; c.y = ny; }
+    else c.h = Math.max(min, py - c.y);
+  }
+  draw();
+}
 $("cv").addEventListener("pointerdown", e => {
+  if (cropMode) { cropDown(e); return; }
   if (!moveMode || !blocks.length) return;
   const p = pos(e); let best = null, bd = Infinity;
   blocks.forEach((b, i) => {
@@ -609,39 +735,45 @@ $("cv").addEventListener("pointerdown", e => {
     if (d < bd) { bd = d; best = i; }
   });
   drag = { i: best, dx: p.x - blocks[best].x, dy: p.y - blocks[best].y };
-  $("cv").setPointerCapture(e.pointerId);
+  try { $("cv").setPointerCapture(e.pointerId); } catch (err) {}
   e.preventDefault();
 });
 $("cv").addEventListener("pointermove", e => {
+  if (cdrag) { cropMove(e); return; }
   if (!drag) return;
   const p = pos(e), b = blocks[drag.i];
   b.x = Math.min(Math.max(0, p.x - drag.dx), W - b.w);
   b.y = Math.min(Math.max(0, p.y - drag.dy), H - b.h);
   draw();
 });
-["pointerup", "pointercancel"].forEach(t => $("cv").addEventListener(t, () => { drag = null; }));
+["pointerup", "pointercancel"].forEach(t => $("cv").addEventListener(t, () => { drag = null; cdrag = null; }));
 
 /* ---------- 결과 이미지 ---------- */
 function makeResult() {
   if (!img) { $("stageHint").textContent = "먼저 사진을 선택해 주세요."; $("stageHint").className = "hint warn"; return; }
+  if (cropMode) { $("stageHint").textContent = "먼저 '자르기 적용' 또는 '취소'를 눌러 주세요."; $("stageHint").className = "hint warn"; return; }
   draw(false);
   $("cv").toBlob(blob => {
     blobCache = blob;
     $("resultImg").src = URL.createObjectURL(blob);
     $("result").hidden = false;
-    updateBoth();
     draw();
     $("result").scrollIntoView({ behavior: "smooth", block: "start" });
   }, "image/jpeg", 0.92);
 }
 $("make").addEventListener("click", makeResult);
+
+/* ---------- 사진 보관함 저장 ---------- */
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-$("saveHint").textContent = isIOS
+const SAVE_HINT = isIOS
   ? "누르면 공유 목록이 나옵니다. 목록에서 '이미지 저장'을 고르면 사진 앱에 저장됩니다."
   : "누르면 사진이 휴대폰에 저장됩니다. 갤러리의 '다운로드' 앨범에서 찾을 수 있습니다.";
+$("saveHint").textContent = SAVE_HINT;
+$("packHint").textContent = SAVE_HINT;
 const stamp = () => { const d = new Date(); return `${d.getMonth()+1}-${d.getDate()}`; };
+const pad = n => String(n).padStart(2, "0");
 
-async function saveFiles(files) {
+async function saveFiles(files, hintEl) {
   if (isIOS && navigator.canShare && navigator.canShare({ files })) {
     try { await navigator.share({ files }); return; }
     catch (e) { if (e && e.name === "AbortError") return; }
@@ -649,8 +781,8 @@ async function saveFiles(files) {
   files.forEach((f, i) => setTimeout(() => {
     const a = document.createElement("a"); a.href = URL.createObjectURL(f); a.download = f.name;
     document.body.appendChild(a); a.click(); a.remove();
-  }, i * 700));
-  $("saveHint").textContent = "저장했습니다. 저장이 안 되면 위 이미지를 길게 눌러 '이미지 저장'을 고르세요.";
+  }, i * 800));
+  hintEl.textContent = `${files.length}장을 저장했습니다. 저장이 안 되면 사진을 길게 눌러 '이미지 저장'을 고르세요.`;
 }
 function blobOf(st) {
   const c = document.createElement("canvas"); c.width = st.W; c.height = st.H;
@@ -660,35 +792,82 @@ function blobOf(st) {
   st.blocks.forEach(b => b.lines.forEach((t, i) => x.fillText(t, b.x, b.y + i * fs * 1.3)));
   return new Promise(r => c.toBlob(r, "image/jpeg", 0.92));
 }
-function updateBoth() {
-  const o = S[1 - cur];
-  $("saveBoth").hidden = !(o.img && o.blocks.length);
-}
 $("save").addEventListener("click", () => {
   if (!blobCache) return;
-  saveFiles([new File([blobCache], `trend${cur+1}_${stamp()}.jpg`, { type: "image/jpeg" })]);
-});
-$("saveBoth").addEventListener("click", async () => {
-  saveCur();
-  const f = [];
-  for (const p of [0, 1]) {
-    if (!S[p].img || !S[p].blocks.length) continue;
-    f.push(new File([await blobOf(S[p])], `trend${p+1}_${stamp()}.jpg`, { type: "image/jpeg" }));
-  }
-  if (f.length) saveFiles(f);
+  saveFiles([new File([blobCache], `trend${cur+1}_${stamp()}.jpg`, { type: "image/jpeg" })], $("saveHint"));
 });
 
+/* ---------- 사진 모으기 (추가 사진 + 한꺼번에 저장) ---------- */
+const EXTRA_LABELS = ["운전상황 1", "운전상황 2", "여분"];
+const extras = EXTRA_LABELS.map(() => ({ file: null, url: null }));
+EXTRA_LABELS.forEach((lab, i) => {
+  const d = document.createElement("div"); d.className = "slot";
+  d.innerHTML = `<div class="slothead"><b>${lab}</b><span class="hint" id="xs${i}">비어 있음</span></div>
+    <img id="xt${i}" class="thumb" alt="${lab} 미리보기" hidden>
+    <div class="btns"><label class="filebtn main" for="xc${i}">사진 찍기</label><label class="filebtn" for="xa${i}">앨범에서 선택</label><button type="button" id="xr${i}" hidden>지우기</button></div>
+    <input type="file" id="xc${i}" accept="image/*" capture="environment"><input type="file" id="xa${i}" accept="image/*">`;
+  $("extras").appendChild(d);
+  ["xc", "xa"].forEach(p => $(p + i).addEventListener("change", e => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    setExtra(i, f); e.target.value = "";
+  }));
+  $("xr" + i).addEventListener("click", () => setExtra(i, null));
+});
+function setExtra(i, f) {
+  const x = extras[i];
+  if (x.url) URL.revokeObjectURL(x.url);
+  x.file = f; x.url = f ? URL.createObjectURL(f) : null;
+  $("xt" + i).hidden = !f; if (f) $("xt" + i).src = x.url;
+  $("xr" + i).hidden = !f;
+  $("xs" + i).textContent = f ? `${(f.size / 1048576).toFixed(1)}MB` : "비어 있음";
+  packUpdate();
+}
+function packItems() {
+  saveCur();
+  const it = [];
+  [0, 1].forEach(p => {
+    const s = S[p];
+    it.push({ kind: "trend", p, ready: !!s.img, label: `트렌드 ${p+1}`, note: !s.img ? "사진 없음" : s.blocks.length ? "글자 넣음" : "글자 없이 사진만" , warn: !s.img || !s.blocks.length });
+  });
+  extras.forEach((x, i) => it.push({ kind: "extra", i, ready: !!x.file, label: EXTRA_LABELS[i], note: x.file ? "준비됨" : "사진 없음", warn: !x.file }));
+  return it;
+}
+function packUpdate() {
+  const it = packItems();
+  $("packList").innerHTML = it.map((x, k) => `<div class="packrow"><span>${k + 1}. ${x.label}</span><span class="${x.warn ? "warn" : "ok"}">${x.note}</span></div>`).join("");
+  const n = it.filter(x => x.ready).length;
+  $("packSave").textContent = n ? `사진 ${n}장 한꺼번에 저장` : "저장할 사진이 없습니다";
+  $("packSave").disabled = !n;
+}
+$("packSave").addEventListener("click", async () => {
+  const files = []; let k = 0;
+  for (const x of packItems()) {
+    if (!x.ready) continue;
+    k++;
+    if (x.kind === "trend") {
+      files.push(new File([await blobOf(S[x.p])], `${pad(k)}_trend${x.p + 1}_${stamp()}.jpg`, { type: "image/jpeg" }));
+    } else {
+      const f = extras[x.i].file, ext = ((f.type || "image/jpeg").split("/")[1] || "jpg").replace("jpeg", "jpg");
+      files.push(new File([f], `${pad(k)}_status${x.i + 1}_${stamp()}.${ext}`, { type: f.type || "image/jpeg" }));
+    }
+  }
+  if (files.length) saveFiles(files, $("packHint"));
+});
+document.addEventListener("tabshow", e => { if (e.detail === "pack") packUpdate(); });
+
 loadCur();
+packUpdate();
 
 })();
 (function () {
 
-const PANELS = { msg: "panel-msg", trend: "panel-trend" };
+const PANELS = { msg: "panel-msg", trend: "panel-trend", pack: "panel-pack" };
 const btns = document.querySelectorAll(".tabs button");
 function show(name) {
   if (!PANELS[name]) name = "msg";
   Object.keys(PANELS).forEach(k => { document.getElementById(PANELS[k]).hidden = (k !== name); });
   btns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.tab === name)));
+  document.dispatchEvent(new CustomEvent("tabshow", { detail: name }));
 }
 btns.forEach(b => b.addEventListener("click", () => { location.hash = b.dataset.tab; show(b.dataset.tab); }));
 window.addEventListener("hashchange", () => show(location.hash.slice(1)));

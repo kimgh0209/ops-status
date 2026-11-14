@@ -116,10 +116,17 @@ input[type=file] { display: none; }
 .cropbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: var(--surface); border-top: 1px solid var(--line);
   padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.cropper { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 50; background: #0b0f14; display: flex; flex-direction: column; }
+.cstage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 12px; }
+#crc { display: block; touch-action: none; }
+.chint { color: #cfd8e2; font-size: 15px; text-align: center; margin: 0; padding: 0 16px 8px; }
+.cbar { display: flex; gap: 8px; padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); background: var(--surface); border-top: 1px solid var(--line); }
+.cbar button { flex: 1; white-space: nowrap; }
 .cropbar .in { max-width: 600px; margin: 0 auto; display: flex; gap: 8px; }
 .cropbar button { flex: 1; }
 
 
+[hidden] { display: none !important; }
 /* 큰 글씨 */
 body { font-size: 18px; }
 h1 { font-size: 26px; }
@@ -326,13 +333,23 @@ pre#out { font-size: 18px; }
   <section>
     <h2>추가 사진 (운전상황 등)</h2>
     <div id="extras"></div>
-    <p class="hint">추가 사진은 크기를 바꾸지 않고 찍은 그대로 저장합니다.</p>
+    <p class="hint">사진을 찍거나 고르면 바로 자르기 화면이 열립니다. 자르지 않으려면 '취소'를 누르세요. 나중에 '다시 자르기'로 고칠 수 있습니다.</p>
   </section>
 
   <section>
     <div class="btns"><button type="button" class="main" id="packSave">사진 한꺼번에 저장</button></div>
     <p class="hint" id="packHint"></p>
   </section>
+</div>
+
+<div class="cropper" id="cropper" hidden>
+  <div class="cstage" id="cstage"><canvas id="crc"></canvas></div>
+  <p class="chint">네 모서리 동그라미를 끌어서 남길 부분을 맞추세요</p>
+  <div class="cbar">
+    <button type="button" id="ccCancel">취소</button>
+    <button type="button" id="ccRot">회전</button>
+    <button type="button" class="main" id="ccApply">적용</button>
+  </div>
 </div>
 </div>
 
@@ -811,29 +828,140 @@ $("save").addEventListener("click", () => {
 
 /* ---------- 사진 모으기 (추가 사진 + 한꺼번에 저장) ---------- */
 const EXTRA_LABELS = ["운전상황 1", "운전상황 2", "여분"];
-const extras = EXTRA_LABELS.map(() => ({ file: null, url: null }));
+const extras = EXTRA_LABELS.map(() => ({ orig: null, file: null, url: null }));
 EXTRA_LABELS.forEach((lab, i) => {
   const d = document.createElement("div"); d.className = "slot";
   d.innerHTML = `<div class="slothead"><b>${lab}</b><span class="hint" id="xs${i}">비어 있음</span></div>
     <img id="xt${i}" class="thumb" alt="${lab} 미리보기" hidden>
-    <div class="btns"><label class="filebtn main" for="xc${i}">사진 찍기</label><label class="filebtn" for="xa${i}">앨범에서 선택</label><button type="button" id="xr${i}" hidden>지우기</button></div>
+    <div class="btns"><label class="filebtn main" for="xc${i}">사진 찍기</label><label class="filebtn" for="xa${i}">앨범에서 선택</label><button type="button" id="xe${i}" hidden>다시 자르기</button><button type="button" id="xr${i}" hidden>지우기</button></div>
     <input type="file" id="xc${i}" accept="image/*" capture="environment"><input type="file" id="xa${i}" accept="image/*">`;
   $("extras").appendChild(d);
-  ["xc", "xa"].forEach(p => $(p + i).addEventListener("change", e => {
+  ["xc", "xa"].forEach(p => $(p + i).addEventListener("change", async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    setExtra(i, f); e.target.value = "";
+    e.target.value = "";
+    setExtra(i, f, f);
+    const out = await openCropper(f);
+    if (out) setExtra(i, f, out);
   }));
-  $("xr" + i).addEventListener("click", () => setExtra(i, null));
+  $("xe" + i).addEventListener("click", async () => {
+    const x = extras[i]; if (!x.orig) return;
+    const out = await openCropper(x.orig);
+    if (out) setExtra(i, x.orig, out);
+  });
+  $("xr" + i).addEventListener("click", () => setExtra(i, null, null));
 });
-function setExtra(i, f) {
+function setExtra(i, orig, f) {
   const x = extras[i];
   if (x.url) URL.revokeObjectURL(x.url);
-  x.file = f; x.url = f ? URL.createObjectURL(f) : null;
+  x.orig = orig; x.file = f; x.url = f ? URL.createObjectURL(f) : null;
   $("xt" + i).hidden = !f; if (f) $("xt" + i).src = x.url;
-  $("xr" + i).hidden = !f;
-  $("xs" + i).textContent = f ? `${(f.size / 1048576).toFixed(1)}MB` : "비어 있음";
+  $("xr" + i).hidden = !f; $("xe" + i).hidden = !f;
+  $("xs" + i).textContent = f ? `${(f.size / 1048576).toFixed(1)}MB` + (f !== orig ? " · 자름" : "") : "비어 있음";
   packUpdate();
 }
+
+/* ---------- 추가 사진 자르기 창 ---------- */
+const CR = { src: null, view: null, crop: null, drag: null, done: null, k: 1, name: "" };
+function crFit() {
+  const st = $("cstage"), v = CR.view; if (!v) return;
+  const s = Math.min((st.clientWidth - 24) / v.width, (st.clientHeight - 24) / v.height);
+  $("crc").style.width = Math.max(40, Math.floor(v.width * s)) + "px";
+  $("crc").style.height = Math.max(40, Math.floor(v.height * s)) + "px";
+  CR.k = 1 / s;
+}
+function crBuildView() {
+  const m = Math.max(CR.src.width, CR.src.height), sc = Math.min(1, 1600 / m);
+  const v = document.createElement("canvas"); v.width = Math.round(CR.src.width * sc); v.height = Math.round(CR.src.height * sc);
+  v.getContext("2d").drawImage(CR.src, 0, 0, v.width, v.height);
+  CR.view = v; $("crc").width = v.width; $("crc").height = v.height;
+  const mx = v.width * 0.04, my = v.height * 0.04;
+  CR.crop = { x: mx, y: my, w: v.width - 2 * mx, h: v.height - 2 * my };
+  crFit(); crDraw();
+}
+function crDraw() {
+  const cv = $("crc"), x = cv.getContext("2d"), c = CR.crop, W2 = cv.width, H2 = cv.height, r = 16 * CR.k;
+  x.drawImage(CR.view, 0, 0);
+  x.fillStyle = "rgba(0,0,0,.55)";
+  x.fillRect(0, 0, W2, c.y); x.fillRect(0, c.y + c.h, W2, H2 - c.y - c.h);
+  x.fillRect(0, c.y, c.x, c.h); x.fillRect(c.x + c.w, c.y, W2 - c.x - c.w, c.h);
+  x.lineWidth = 2 * CR.k; x.strokeStyle = "#ffffff"; x.strokeRect(c.x, c.y, c.w, c.h);
+  [[c.x, c.y], [c.x + c.w, c.y], [c.x, c.y + c.h], [c.x + c.w, c.y + c.h]].forEach(([px, py]) => {
+    x.beginPath(); x.arc(px, py, r, 0, Math.PI * 2); x.fillStyle = "#ffffff"; x.fill();
+    x.lineWidth = 2 * CR.k; x.strokeStyle = "#1f5f8b"; x.stroke();
+  });
+}
+function openCropper(file) {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => {
+      const m = Math.max(im.naturalWidth, im.naturalHeight), sc = Math.min(1, 4000 / m);
+      const c = document.createElement("canvas"); c.width = Math.round(im.naturalWidth * sc); c.height = Math.round(im.naturalHeight * sc);
+      c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      CR.src = c; CR.name = file.name; CR.done = resolve;
+      $("cropper").hidden = false; document.body.style.overflow = "hidden";
+      crBuildView();
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    im.src = url;
+  });
+}
+function crClose(result) {
+  $("cropper").hidden = true; document.body.style.overflow = "";
+  const d = CR.done; CR.done = null; CR.src = null; CR.view = null;
+  if (d) d(result);
+}
+$("ccCancel").addEventListener("click", () => crClose(null));
+$("ccRot").addEventListener("click", () => {
+  if (!CR.src) return;
+  const c = document.createElement("canvas"); c.width = CR.src.height; c.height = CR.src.width;
+  const x = c.getContext("2d"); x.translate(c.width, 0); x.rotate(Math.PI / 2); x.drawImage(CR.src, 0, 0);
+  CR.src = c; crBuildView();
+});
+$("ccApply").addEventListener("click", () => {
+  if (!CR.src) return;
+  const f = CR.src.width / CR.view.width, c = CR.crop;
+  const out = document.createElement("canvas"); out.width = Math.round(c.w * f); out.height = Math.round(c.h * f);
+  out.getContext("2d").drawImage(CR.src, c.x * f, c.y * f, c.w * f, c.h * f, 0, 0, out.width, out.height);
+  out.toBlob(b => {
+    const base = (CR.name || "photo").replace(/\.[^.]+$/, "");
+    crClose(new File([b], base + "_crop.jpg", { type: "image/jpeg" }));
+  }, "image/jpeg", 0.92);
+});
+function crPos(e) {
+  const r = $("crc").getBoundingClientRect();
+  return { x: (e.clientX - r.left) * $("crc").width / r.width, y: (e.clientY - r.top) * $("crc").height / r.height };
+}
+$("crc").addEventListener("pointerdown", e => {
+  if (!CR.crop) return;
+  const p = crPos(e), c = CR.crop, r = 16 * CR.k * 2;
+  const corners = [["l", "t", c.x, c.y], ["r", "t", c.x + c.w, c.y], ["l", "b", c.x, c.y + c.h], ["r", "b", c.x + c.w, c.y + c.h]];
+  let hit = null, bd = Infinity;
+  corners.forEach(([hx, hy, x, y]) => { const d = Math.hypot(p.x - x, p.y - y); if (d < r && d < bd) { bd = d; hit = { hx, hy }; } });
+  if (hit) CR.drag = { type: "corner", hx: hit.hx, hy: hit.hy };
+  else if (p.x > c.x && p.x < c.x + c.w && p.y > c.y && p.y < c.y + c.h) CR.drag = { type: "move", dx: p.x - c.x, dy: p.y - c.y };
+  else return;
+  try { $("crc").setPointerCapture(e.pointerId); } catch (err) {}
+  e.preventDefault();
+});
+$("crc").addEventListener("pointermove", e => {
+  if (!CR.drag) return;
+  const p = crPos(e), c = CR.crop, V = CR.view, min = Math.min(V.width, V.height) * 0.12;
+  const px = Math.min(Math.max(p.x, 0), V.width), py = Math.min(Math.max(p.y, 0), V.height);
+  if (CR.drag.type === "move") {
+    c.x = Math.min(Math.max(0, p.x - CR.drag.dx), V.width - c.w);
+    c.y = Math.min(Math.max(0, p.y - CR.drag.dy), V.height - c.h);
+  } else {
+    if (CR.drag.hx === "l") { const nx = Math.min(px, c.x + c.w - min); c.w += c.x - nx; c.x = nx; }
+    else c.w = Math.max(min, px - c.x);
+    if (CR.drag.hy === "t") { const ny = Math.min(py, c.y + c.h - min); c.h += c.y - ny; c.y = ny; }
+    else c.h = Math.max(min, py - c.y);
+  }
+  crDraw();
+});
+["pointerup", "pointercancel"].forEach(t => $("crc").addEventListener(t, () => { CR.drag = null; }));
+window.addEventListener("resize", () => { if (!$("cropper").hidden) { crFit(); crDraw(); } });
+
 function packItems() {
   saveCur();
   const it = [];

@@ -93,7 +93,7 @@ button, .filebtn {
 button.main, .filebtn.main { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 700; }
 button:disabled { opacity: .5; }
 button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
-.preset button { flex: 1; font-weight: 700; }
+.preset button, .sizes button { flex: 1; font-weight: 700; }
 .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 .ctl label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .sw { display: inline-flex; gap: 6px; }
@@ -150,6 +150,8 @@ pre#out { font-size: 18px; }
 .bar button.alt { font-size: 17px; }
 .sw button { width: 42px; height: 42px; padding: 0; }
 .row input { font-size: 20px; }
+#bulletBtns { margin-bottom: 10px; }
+#bulletBtns button { flex: 1; }
 .bar button { white-space: nowrap; padding-left: 10px; padding-right: 10px; }
 .bar button.main { font-size: 18px; }
 #msgCv { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
@@ -233,6 +235,7 @@ pre#out { font-size: 18px; }
 
   <section>
     <h2>완성된 메시지</h2>
+    <div class="btns" id="bulletBtns" role="group" aria-label="글머리 기호"><button type="button" data-b="-" aria-pressed="true">글머리 -</button><button type="button" data-b="•" aria-pressed="false">글머리 •</button></div>
     <p class="warn" id="warn" hidden></p>
     <pre id="out"></pre>
   </section>
@@ -358,6 +361,22 @@ pre#out { font-size: 18px; }
     <label class="chk"><input type="checkbox" id="wmExtra"> 운전상황 등 추가 사진에도 넣기</label>
     <p class="hd" style="margin:10px 0 4px">문구</p>
     <input type="text" id="wmText" maxlength="40" placeholder="AI 활용 작성">
+    <p class="hd" style="margin:12px 0 6px">글씨 색</p>
+    <div class="sw" id="wmColors" role="group" aria-label="워터마크 색">
+      <button type="button" data-c="#1a3fb0" style="background:#1a3fb0" aria-label="파랑" aria-pressed="true"></button>
+      <button type="button" data-c="#c0182b" style="background:#c0182b" aria-label="빨강" aria-pressed="false"></button>
+      <button type="button" data-c="#14171c" style="background:#14171c" aria-label="검정" aria-pressed="false"></button>
+      <button type="button" data-c="#6b7480" style="background:#6b7480" aria-label="회색" aria-pressed="false"></button>
+      <button type="button" data-c="#ffffff" style="background:#ffffff;border-color:#9aa5b1" aria-label="흰색" aria-pressed="false"></button>
+    </div>
+    <p class="hd" style="margin:12px 0 6px">글씨 크기</p>
+    <div class="btns sizes" id="wmSizes" role="group" aria-label="워터마크 크기">
+      <button type="button" data-s="s" aria-pressed="false">작게</button>
+      <button type="button" data-s="m" aria-pressed="true">보통</button>
+      <button type="button" data-s="l" aria-pressed="false">크게</button>
+    </div>
+    <p class="hd" style="margin:12px 0 6px">미리보기</p>
+    <canvas id="wmSample" width="1080" height="180" style="border:1px solid var(--line);border-radius:8px;background:#fff"></canvas>
     <p class="hint">메시지에는 '※ 문구' 한 줄이 붙습니다. 카톡은 글자 크기를 바꿀 수 없어 일반 크기로 나옵니다. 사진에는 오른쪽 아래에 작게 들어갑니다.</p>
   </section>
 
@@ -381,22 +400,30 @@ pre#out { font-size: 18px; }
 
 <script>
 window.WM = (function () {
-  const KEY = "wm-settings-v2";
-  const s = { text: "AI 활용 작성", msg: true, photo: true, extra: true, msgImg: true };
+  const KEY = "wm-settings-v3";
+  const SIZES = { s: [0.014, 18], m: [0.024, 26], l: [0.036, 38] };
+  const s = { text: "AI 활용 작성", msg: true, photo: true, extra: true, msgImg: true, color: "#1a3fb0", size: "m", bullet: "-" };
   try { Object.assign(s, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) {}
   return {
     get: () => s,
     set(p) { Object.assign(s, p); try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} document.dispatchEvent(new Event("wmchange")); },
     msgLines() { const t = (s.text || "").trim(); return s.msg && t ? ["", "※ " + t] : []; },
+    bullets(lines) {
+      const b = s.bullet === "•" ? "•" : "-";
+      return lines.map(l => /^\s?[•-]\s/.test(l) ? b + " " + l.replace(/^\s?[•-]\s/, "") : l);
+    },
     draw(ctx, w, h) {
       const t = (s.text || "").trim(); if (!t) return;
-      const fs = Math.max(20, Math.round(w * 0.016));
+      const z = SIZES[s.size] || SIZES.m;
+      const fs = Math.max(z[1], Math.round(w * z[0]));
+      const light = String(s.color).toLowerCase() === "#ffffff";
       ctx.save();
-      ctx.font = fs + 'px "Noto Sans KR", system-ui, "Malgun Gothic", sans-serif';
+      ctx.font = "700 " + fs + 'px "Noto Sans KR", system-ui, "Malgun Gothic", sans-serif';
       ctx.textBaseline = "bottom"; ctx.textAlign = "right";
       const x = w - fs * 0.8, y = h - fs * 0.6;
-      ctx.lineWidth = Math.max(2, fs * 0.18); ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.strokeText(t, x, y);
-      ctx.fillStyle = "rgba(20,23,28,.6)"; ctx.fillText(t, x, y);
+      ctx.lineJoin = "round";
+      ctx.lineWidth = Math.max(3, fs * 0.2); ctx.strokeStyle = light ? "rgba(0,0,0,.65)" : "rgba(255,255,255,.9)"; ctx.strokeText(t, x, y);
+      ctx.fillStyle = s.color; ctx.fillText(t, x, y);
       ctx.restore();
     }
   };
@@ -473,7 +500,7 @@ function build() {
     `■ 특이사항`,
     ...(notes.length ? notes.map(s => `- ${s}`) : ["- 특이사항 없음"])
   ];
-  return { text: lines.concat(window.WM.msgLines()).join("\n"), plain: lines.join("\n"), missing: missing.map(k => label[k]), cc, cc2 };
+  return { text: window.WM.bullets(lines).concat(window.WM.msgLines()).join("\n"), plain: window.WM.bullets(lines).join("\n"), missing: missing.map(k => label[k]), cc, cc2 };
 }
 
 function render() {
@@ -566,6 +593,12 @@ $("saveImg").addEventListener("click", async () => {
 });
 $("msgImgHint").textContent = window.OPS_SAVE_HINT;
 renderImg();
+
+const bulletBtns = document.querySelectorAll("#bulletBtns button");
+function syncBullet() { bulletBtns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.b === WM.get().bullet))); }
+bulletBtns.forEach(b => b.addEventListener("click", () => WM.set({ bullet: b.dataset.b })));
+document.addEventListener("wmchange", syncBullet);
+syncBullet();
 
 })();
 (function () {
@@ -1144,7 +1177,19 @@ document.addEventListener("tabshow", e => { if (e.detail === "pack") packUpdate(
     WM.set({ msg: $("wmMsg").checked, photo: $("wmPhoto").checked, extra: $("wmExtra").checked })));
   $("wmMsgImg").checked = w.msgImg;
   $("wmMsgImg").addEventListener("change", () => WM.set({ msgImg: $("wmMsgImg").checked }));
-  document.addEventListener("wmchange", () => { if (img && !cropMode) draw(); packUpdate(); });
+  function syncWM() {
+    const c = WM.get();
+    document.querySelectorAll("#wmColors button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.c === c.color)));
+    document.querySelectorAll("#wmSizes button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.s === c.size)));
+    const cv = $("wmSample"), x = cv.getContext("2d");
+    x.fillStyle = "#ffffff"; x.fillRect(0, 0, cv.width, cv.height);
+    x.fillStyle = "#d3d9df"; for (let i = 0; i < 3; i++) x.fillRect(40, 28 + i * 34, 640 - i * 120, 16);
+    WM.draw(x, cv.width, cv.height);
+  }
+  document.querySelectorAll("#wmColors button").forEach(b => b.addEventListener("click", () => WM.set({ color: b.dataset.c })));
+  document.querySelectorAll("#wmSizes button").forEach(b => b.addEventListener("click", () => WM.set({ size: b.dataset.s })));
+  document.addEventListener("wmchange", () => { if (img && !cropMode) draw(); packUpdate(); syncWM(); });
+  syncWM();
 })();
 
 loadCur();

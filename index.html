@@ -230,6 +230,9 @@ pre#out { font-size: 18px; }
 
   <section>
     <h2>특이사항 (한 줄에 하나)</h2>
+    <div class="f"><label for="aic">GT Anti-Icing CV 개도 (%)</label><input id="aic" inputmode="decimal" autocomplete="off" placeholder="예) 26"></div>
+    <div class="chips" id="aicChips"><button type="button" class="chip" data-v="Close">Close</button><button type="button" class="chip" data-v="없음">이 줄 빼기</button></div>
+    <p class="hint" style="margin:6px 0 14px">숫자를 쓰면 특이사항 맨 아래 줄에 'GT Anti-Icing CV Auto 26% Open'으로 자동으로 들어갑니다. 닫혀 있으면 Close, 필요 없으면 '이 줄 빼기'를 누르세요.</p>
     <div class="f"><label for="notes" class="sr" style="position:absolute;left:-9999px">특이사항</label><textarea id="notes"></textarea></div>
   </section>
 
@@ -445,10 +448,10 @@ window.OPS_SAVE = async function (files, hintEl) {
 };
 (function () {
 
-const KEYS = ["temp","weather","humidity","pressure","gt","gt2","st","st2","reverse","raw","demi","normal","cfp","emer","nox","nh3","steam","notes"];
-const SAMPLE = {temp:"10.1",weather:"맑음",humidity:"96.0",pressure:"1007",gt:"398",gt2:"384",st:"166",st2:"162",reverse:"0",
+const KEYS = ["temp","weather","humidity","pressure","gt","gt2","st","st2","reverse","raw","demi","normal","cfp","emer","nox","nh3","steam","notes","aic"];
+const SAMPLE = {aic:"",temp:"10.1",weather:"맑음",humidity:"96.0",pressure:"1007",gt:"398",gt2:"384",st:"166",st2:"162",reverse:"0",
   raw:"21117",demi:"12239",normal:"2806",cfp:"5187",emer:"68",nox:"3.43",nh3:"2.07",steam:"90",
-  notes:"ST #1 BRG 진동 변화 모니터링 중\nGT Anti-Icing CV Close"};
+  notes:"ST #1 BRG 진동 변화 모니터링 중"};
 const STORE = "ops-status-last-v1";
 const $ = id => document.getElementById(id);
 
@@ -456,6 +459,15 @@ function load() {
   let d = {};
   try { d = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) {}
   KEYS.forEach(k => { $(k).value = (d[k] !== undefined ? d[k] : SAMPLE[k]); });
+  // 예전에 특이사항 칸에 들어 있던 GT Anti-Icing 줄은 위 개도 칸으로 자동 입력되므로 여기서는 뺀다
+  const keep = [];
+  $("notes").value.split("\n").forEach(l => {
+    if (/^\s*-?\s*GT Anti-Icing CV/i.test(l)) {
+      const m = l.match(/Auto\s*([\d.]+)\s*%/i);
+      if (m && !$("aic").value) $("aic").value = m[1];
+    } else keep.push(l);
+  });
+  $("notes").value = keep.join("\n");
 }
 function save() {
   const d = {}; KEYS.forEach(k => d[k] = $(k).value);
@@ -472,8 +484,18 @@ function build() {
   const n = {}; Object.keys(label).forEach(k => n[k] = need(k));
   if (!v.weather.trim()) missing.push("weather");
   label.weather = "날씨";
+  if (!(v.aic || "").trim()) missing.push("aic");
+  label.aic = "GT Anti-Icing CV 개도";
   const now = new Date();
-  const notes = v.notes.split("\n").map(s => s.trim().replace(/^-\s*/, "")).filter(Boolean);
+  // GT Anti-Icing CV 줄: 숫자면 Auto N% Open, 글자면 그대로(예: Close), '없음'이면 줄 빼기
+  const aicRaw = (v.aic || "").trim();
+  let aicLine = "";
+  if (aicRaw && aicRaw !== "없음") {
+    const an = num(aicRaw.replace(/%/g, ""));
+    aicLine = isNaN(an) ? `GT Anti-Icing CV ${aicRaw}` : `GT Anti-Icing CV Auto ${an}% Open`;
+  }
+  let notes = v.notes.split("\n").map(s => s.trim().replace(/^-\s*/, "")).filter(Boolean);
+  if (aicLine) notes = notes.filter(s => !/^GT Anti-Icing CV/i.test(s)).concat(aicLine);
   const r = x => Math.round(x);
   const cc = r(n.gt) + r(n.st), cc2 = r(n.gt2) + r(n.st2);
   const lines = [
@@ -534,6 +556,9 @@ async function copy() {
   b.addEventListener("click", () => { $("weather").value = t; render(); });
   $("wchips").appendChild(b);
 });
+document.querySelectorAll("#aicChips .chip").forEach(c => c.addEventListener("click", () => {
+  $("aic").value = c.dataset.v; $("aic").dispatchEvent(new Event("input", { bubbles: true }));
+}));
 const d0 = new Date();
 $("today").textContent = `${d0.getMonth()+1}월 ${d0.getDate()}일 · 어제 값이 채워져 있습니다. 바뀐 칸만 고치세요.`;
 load();

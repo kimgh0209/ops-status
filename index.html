@@ -1,5 +1,6 @@
 <title>운전현황 도우미</title>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&display=swap">
 <style>
@@ -74,7 +75,8 @@ h1 { font-size: 20px; margin: 0; }
 section { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
 h2 { font-size: 13px; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; font-weight: 700; }
 .rows { display: flex; flex-direction: column; gap: 8px; }
-.row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 16px minmax(0, 1fr) minmax(0, .7fr); gap: 6px; align-items: center; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr) minmax(0, .8fr); gap: 6px; align-items: center; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.row > input:first-child { grid-column: 1 / -1; font-weight: 700; }
 .row .tilde { text-align: center; color: var(--muted); }
 .hd { font-size: 12px; color: var(--muted); }
 input[type=text], textarea {
@@ -106,6 +108,26 @@ canvas.move { touch-action: none; cursor: grab; }
 input[type=file] { display: none; }
 
 
+/* 큰 글씨 */
+body { font-size: 18px; }
+h1 { font-size: 26px; }
+h2 { font-size: 16px; }
+.sub, .hint { font-size: 16px; }
+label, .ctl label { font-size: 16px; }
+.hd { font-size: 15px; }
+input, textarea, input[type=text] { font-size: 21px; padding: 12px 10px; }
+textarea { font-size: 19px; }
+button, .filebtn { font-size: 18px; padding: 14px 16px; }
+button.main, .filebtn.main { font-size: 19px; }
+.tabs button { font-size: 19px; }
+.chip { font-size: 17px; padding: 9px 15px; }
+.calc { font-size: 17px; }
+.warn, .toast { font-size: 17px; }
+pre#out { font-size: 18px; }
+.bar button.main { font-size: 20px; padding: 15px; }
+.bar button.alt { font-size: 17px; }
+.sw button { width: 42px; height: 42px; padding: 0; }
+.row input { font-size: 20px; }
 /* 탭 */
 #top { margin-bottom: 16px; }
 .wrap { max-width: 600px; }
@@ -219,9 +241,7 @@ input[type=file] { display: none; }
 
   <section>
     <h2>2. 적을 내용</h2>
-    <div class="rows" id="rows">
-      <div class="row hd"><span>항목</span><span>최소</span><span></span><span>최대</span><span>단위</span></div>
-    </div>
+    <div class="rows" id="rows"></div>
     <p class="hint">값을 비운 줄은 사진에 넣지 않습니다. 항목 이름과 단위는 고치면 기억합니다.</p>
     <p class="hd" style="margin:10px 0 4px">메모 (한 줄에 하나, 비워도 됩니다)</p>
     <textarea id="memo" placeholder="예) 11:24 안전계통 고장"></textarea>
@@ -256,10 +276,10 @@ input[type=file] { display: none; }
     <h2>5. 완성 이미지</h2>
     <img id="resultImg" alt="글자가 들어간 트렌드 사진">
     <div class="btns" style="margin-top:10px">
-      <button type="button" id="share" hidden>공유하기 (카톡 선택)</button>
-      <button type="button" id="dl">파일로 저장</button>
+      <button type="button" class="main" id="save">사진 보관함에 저장</button>
+      <button type="button" class="main" id="saveBoth" hidden>트렌드 1·2 한꺼번에 저장</button>
     </div>
-    <p class="hint" id="saveHint">저장이 안 되면 위 이미지를 길게 눌러 사진으로 저장하세요.</p>
+    <p class="hint" id="saveHint"></p>
   </section>
 </div>
 </div>
@@ -372,10 +392,10 @@ render();
 
 const $ = id => document.getElementById(id);
 const FONT = '"Nanum Pen Script", "Gaegu", "Segoe Print", cursive';
-const PREF = "trend-note-pref-v2";
+const PREF = "trend-note-pref-v3";
 const NROWS = 4;
 const DEFAULT_LABELS = [
-  [["GT Load", "MW"], ["ST Load", "MW"], ["ST BRG Vib", "µm"], ["", ""]],
+  [["GT Load", "MW"], ["ST Load", "MW"], ["ST #1 BRG Vib", "µm"], ["", ""]],
   [["ST Load", "MW"], ["P/S HDR press", "bar"], ["P/S HDR Flow", "t/h"], ["", ""]]
 ];
 const EMPTY_HINT = "사진을 선택하면 아래 미리보기에 나타납니다.";
@@ -402,7 +422,7 @@ function savePref() {
 /* ---------- 입력 행 ---------- */
 rows.forEach(i => {
   const r = document.createElement("div"); r.className = "row";
-  r.innerHTML = `<input type="text" id="l${i}" aria-label="항목 ${i+1}"><input type="text" id="a${i}" inputmode="decimal" aria-label="최소 ${i+1}" placeholder="383"><span class="tilde">~</span><input type="text" id="b${i}" inputmode="decimal" aria-label="최대 ${i+1}" placeholder="410"><input type="text" id="u${i}" aria-label="단위 ${i+1}">`;
+  r.innerHTML = `<input type="text" id="l${i}" aria-label="항목 ${i+1}"><input type="text" id="a${i}" inputmode="decimal" aria-label="최소 ${i+1}" placeholder="최소"><span class="tilde">~</span><input type="text" id="b${i}" inputmode="decimal" aria-label="최대 ${i+1}" placeholder="최대"><input type="text" id="u${i}" aria-label="단위 ${i+1}">`;
   $("rows").appendChild(r);
 });
 function syncColorButtons() {
@@ -609,25 +629,53 @@ function makeResult() {
     blobCache = blob;
     $("resultImg").src = URL.createObjectURL(blob);
     $("result").hidden = false;
-    const f = new File([blob], "trend.jpg", { type: "image/jpeg" });
-    $("share").hidden = !(navigator.canShare && navigator.canShare({ files: [f] }));
+    updateBoth();
     draw();
     $("result").scrollIntoView({ behavior: "smooth", block: "start" });
   }, "image/jpeg", 0.92);
 }
 $("make").addEventListener("click", makeResult);
-$("dl").addEventListener("click", () => {
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+$("saveHint").textContent = isIOS
+  ? "누르면 공유 목록이 나옵니다. 목록에서 '이미지 저장'을 고르면 사진 앱에 저장됩니다."
+  : "누르면 사진이 휴대폰에 저장됩니다. 갤러리의 '다운로드' 앨범에서 찾을 수 있습니다.";
+const stamp = () => { const d = new Date(); return `${d.getMonth()+1}-${d.getDate()}`; };
+
+async function saveFiles(files) {
+  if (isIOS && navigator.canShare && navigator.canShare({ files })) {
+    try { await navigator.share({ files }); return; }
+    catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  files.forEach((f, i) => setTimeout(() => {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(f); a.download = f.name;
+    document.body.appendChild(a); a.click(); a.remove();
+  }, i * 700));
+  $("saveHint").textContent = "저장했습니다. 저장이 안 되면 위 이미지를 길게 눌러 '이미지 저장'을 고르세요.";
+}
+function blobOf(st) {
+  const c = document.createElement("canvas"); c.width = st.W; c.height = st.H;
+  const x = c.getContext("2d"); x.drawImage(st.img, 0, 0, st.W, st.H);
+  const fs = Math.max(14, Math.round(st.W * Number($("size").value) / 1000));
+  x.font = `${fs}px ${FONT}`; x.textBaseline = "top"; x.fillStyle = color;
+  st.blocks.forEach(b => b.lines.forEach((t, i) => x.fillText(t, b.x, b.y + i * fs * 1.3)));
+  return new Promise(r => c.toBlob(r, "image/jpeg", 0.92));
+}
+function updateBoth() {
+  const o = S[1 - cur];
+  $("saveBoth").hidden = !(o.img && o.blocks.length);
+}
+$("save").addEventListener("click", () => {
   if (!blobCache) return;
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blobCache);
-  const d = new Date();
-  a.download = `trend${cur+1}_${d.getMonth()+1}-${d.getDate()}.jpg`;
-  document.body.appendChild(a); a.click(); a.remove();
-  $("saveHint").textContent = "저장이 시작되지 않으면 위 이미지를 길게 눌러 사진으로 저장하세요.";
+  saveFiles([new File([blobCache], `trend${cur+1}_${stamp()}.jpg`, { type: "image/jpeg" })]);
 });
-$("share").addEventListener("click", async () => {
-  if (!blobCache) return;
-  try { await navigator.share({ files: [new File([blobCache], `trend${cur+1}.jpg`, { type: "image/jpeg" })] }); }
-  catch (e) { $("saveHint").textContent = "공유가 취소되었거나 막혀 있습니다. 이미지를 길게 눌러 저장하세요."; }
+$("saveBoth").addEventListener("click", async () => {
+  saveCur();
+  const f = [];
+  for (const p of [0, 1]) {
+    if (!S[p].img || !S[p].blocks.length) continue;
+    f.push(new File([await blobOf(S[p])], `trend${p+1}_${stamp()}.jpg`, { type: "image/jpeg" }));
+  }
+  if (f.length) saveFiles(f);
 });
 
 loadCur();

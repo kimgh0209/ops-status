@@ -670,13 +670,15 @@ $("cropBtn").addEventListener("click", () => {
   draw();
   $("stage").scrollIntoView({ behavior: "auto", block: "center" });
 });
-$("cropCancel").addEventListener("click", () => { cropMode = false; crop = null; setCropUI(); autoPlaceOrDraw(); });
+function toPhotoTop() { $("fileCam").closest("section").scrollIntoView({ behavior: "auto", block: "start" }); }
+$("cropCancel").addEventListener("click", () => { cropMode = false; crop = null; setCropUI(); autoPlaceOrDraw(); toPhotoTop(); });
 $("cropApply").addEventListener("click", () => {
   if (!cropMode || !crop) return;
   const c = document.createElement("canvas"); c.width = Math.round(crop.w); c.height = Math.round(crop.h);
   c.getContext("2d").drawImage(img, crop.x, crop.y, crop.w, crop.h, 0, 0, c.width, c.height);
   img = c; W = c.width; H = c.height; $("cv").width = W; $("cv").height = H;
   cropMode = false; crop = null; setCropUI(); autoPlace();
+  toPhotoTop();
 });
 function autoPlaceOrDraw() { if (blocks.length) { draw(); $("stageHint").textContent = "취소했습니다."; } else autoPlace(); }
 $("rotBtn").addEventListener("click", () => {

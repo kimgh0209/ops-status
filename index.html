@@ -113,6 +113,8 @@ input[type=file] { display: none; }
 .thumb { width: 100%; max-height: 240px; object-fit: contain; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
 .packrow { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .packrow:last-child { border-bottom: 0; }
+.chk { display: flex; align-items: center; gap: 12px; padding: 8px 0; font-size: 16px; color: var(--fg); cursor: pointer; }
+.chk input { width: 24px; height: 24px; padding: 0; flex: none; }
 .cropbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: var(--surface); border-top: 1px solid var(--line);
   padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
@@ -340,6 +342,16 @@ pre#out { font-size: 18px; }
   </section>
 
   <section>
+    <h2>AI 사용 표시 (워터마크)</h2>
+    <label class="chk"><input type="checkbox" id="wmMsg"> 메시지 맨 아래에 한 줄 넣기</label>
+    <label class="chk"><input type="checkbox" id="wmPhoto"> 트렌드 사진 구석에 작게 넣기</label>
+    <label class="chk"><input type="checkbox" id="wmExtra"> 운전상황 등 추가 사진에도 넣기</label>
+    <p class="hd" style="margin:10px 0 4px">문구</p>
+    <input type="text" id="wmText" maxlength="40" placeholder="AI 활용 작성">
+    <p class="hint">메시지에는 '※ 문구' 한 줄이 붙습니다. 카톡은 글자 크기를 바꿀 수 없어 일반 크기로 나옵니다. 사진에는 오른쪽 아래에 작게 들어갑니다.</p>
+  </section>
+
+  <section>
     <div class="btns"><button type="button" class="main" id="packSave">사진 한꺼번에 저장</button></div>
     <p class="hint" id="packHint"></p>
   </section>
@@ -358,6 +370,16 @@ pre#out { font-size: 18px; }
 <button type="button" id="toTop" class="totop" hidden aria-label="맨 위로">↑ 맨 위로</button>
 
 <script>
+window.WM = (function () {
+  const KEY = "wm-settings-v1";
+  const s = { text: "AI 활용 작성", msg: true, photo: true, extra: false };
+  try { Object.assign(s, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) {}
+  return {
+    get: () => s,
+    set(p) { Object.assign(s, p); try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} document.dispatchEvent(new Event("wmchange")); },
+    msgLines() { const t = (s.text || "").trim(); return s.msg && t ? ["", "※ " + t] : []; }
+  };
+})();
 (function () {
 
 const KEYS = ["temp","weather","humidity","pressure","gt","gt2","st","st2","reverse","raw","demi","normal","cfp","emer","nox","nh3","steam","notes"];
@@ -415,7 +437,7 @@ function build() {
     `■ 특이사항`,
     ...(notes.length ? notes.map(s => `- ${s}`) : ["- 특이사항 없음"])
   ];
-  return { text: lines.join("\n"), missing: missing.map(k => label[k]), cc, cc2 };
+  return { text: lines.concat(window.WM.msgLines()).join("\n"), missing: missing.map(k => label[k]), cc, cc2 };
 }
 
 function render() {
@@ -459,6 +481,8 @@ $("clear").addEventListener("click", () => {
   render(); $("temp").focus();
 });
 render();
+
+document.addEventListener("wmchange", render);
 
 })();
 (function () {
@@ -635,6 +659,18 @@ function draw(boxes = showBoxes) {
       ctx.strokeRect(b.x - 6, b.y - 4, b.w + 12, b.h + 8); ctx.restore();
     }
   });
+  if (WM.get().photo) drawWM(ctx, W, H);
+}
+function drawWM(ctx, w, h) {
+  const t = (WM.get().text || "").trim(); if (!t) return;
+  const fs = Math.max(14, Math.round(w * 0.016));
+  ctx.save();
+  ctx.font = `${fs}px "Noto Sans KR", system-ui, "Malgun Gothic", sans-serif`;
+  ctx.textBaseline = "bottom"; ctx.textAlign = "right";
+  const x = w - fs * 0.8, y = h - fs * 0.6;
+  ctx.lineWidth = Math.max(2, fs * 0.18); ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.strokeText(t, x, y);
+  ctx.fillStyle = "rgba(20,23,28,.6)"; ctx.fillText(t, x, y);
+  ctx.restore();
 }
 function refresh(replace) {
   if (!img || cropMode) return;
@@ -823,6 +859,7 @@ function blobOf(st) {
   const fs = Math.max(14, Math.round(st.W * Number($("size").value) / 1000));
   x.font = `${fs}px ${FONT}`; x.textBaseline = "top"; x.fillStyle = color;
   st.blocks.forEach(b => b.lines.forEach((t, i) => x.fillText(t, b.x, b.y + i * fs * 1.3)));
+  if (WM.get().photo) drawWM(x, st.W, st.H);
   return new Promise(r => c.toBlob(r, "image/jpeg", 0.92));
 }
 $("save").addEventListener("click", () => {
@@ -966,6 +1003,19 @@ $("crc").addEventListener("pointermove", e => {
 ["pointerup", "pointercancel"].forEach(t => $("crc").addEventListener(t, () => { CR.drag = null; }));
 window.addEventListener("resize", () => { if (!$("cropper").hidden) { crFit(); crDraw(); } });
 
+function extraWM(f) {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(f), im = new Image();
+    im.onload = () => {
+      const m = Math.max(im.naturalWidth, im.naturalHeight), sc = Math.min(1, 4000 / m);
+      const c = document.createElement("canvas"); c.width = Math.round(im.naturalWidth * sc); c.height = Math.round(im.naturalHeight * sc);
+      const x = c.getContext("2d"); x.drawImage(im, 0, 0, c.width, c.height); drawWM(x, c.width, c.height);
+      URL.revokeObjectURL(url); c.toBlob(b => resolve(b), "image/jpeg", 0.92);
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    im.src = url;
+  });
+}
 function packItems() {
   saveCur();
   const it = [];
@@ -992,12 +1042,26 @@ $("packSave").addEventListener("click", async () => {
       files.push(new File([await blobOf(S[x.p])], `${pad(k)}_trend${x.p + 1}_${stamp()}.jpg`, { type: "image/jpeg" }));
     } else {
       const f = extras[x.i].file, ext = ((f.type || "image/jpeg").split("/")[1] || "jpg").replace("jpeg", "jpg");
+      if (WM.get().extra) {
+        const wb = await extraWM(f);
+        if (wb) { files.push(new File([wb], `${pad(k)}_status${x.i + 1}_${stamp()}.jpg`, { type: "image/jpeg" })); continue; }
+      }
       files.push(new File([f], `${pad(k)}_status${x.i + 1}_${stamp()}.${ext}`, { type: f.type || "image/jpeg" }));
     }
   }
   if (files.length) saveFiles(files, $("packHint"));
 });
 document.addEventListener("tabshow", e => { if (e.detail === "pack") packUpdate(); });
+
+/* ---------- 워터마크 설정 ---------- */
+(function () {
+  const w = WM.get();
+  $("wmText").value = w.text; $("wmMsg").checked = w.msg; $("wmPhoto").checked = w.photo; $("wmExtra").checked = w.extra;
+  $("wmText").addEventListener("input", () => WM.set({ text: $("wmText").value }));
+  ["wmMsg", "wmPhoto", "wmExtra"].forEach(id => $(id).addEventListener("change", () =>
+    WM.set({ msg: $("wmMsg").checked, photo: $("wmPhoto").checked, extra: $("wmExtra").checked })));
+  document.addEventListener("wmchange", () => { if (img && !cropMode) draw(); });
+})();
 
 loadCur();
 packUpdate();

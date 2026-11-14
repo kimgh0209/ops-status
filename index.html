@@ -150,6 +150,9 @@ pre#out { font-size: 18px; }
 .bar button.alt { font-size: 17px; }
 .sw button { width: 42px; height: 42px; padding: 0; }
 .row input { font-size: 20px; }
+.bar button { white-space: nowrap; padding-left: 10px; padding-right: 10px; }
+.bar button.main { font-size: 18px; }
+#msgCv { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 /* 맨 위로 버튼 */
 .totop { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(104px + env(safe-area-inset-bottom, 0px)); z-index: 30;
   padding: 12px 18px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); border: 0; font-weight: 700; font-size: 17px; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
@@ -233,11 +236,17 @@ pre#out { font-size: 18px; }
     <p class="warn" id="warn" hidden></p>
     <pre id="out"></pre>
   </section>
+  <section>
+    <h2>사진으로 저장 (미리보기)</h2>
+    <canvas id="msgCv" width="1080" height="600"></canvas>
+    <p class="hint" id="msgImgHint"></p>
+  </section>
 </div>
 
 <div class="bar"><div class="in">
   <button class="alt" id="clear" type="button">값 비우기</button>
-  <button class="main" id="copy" type="button">메시지 복사</button>
+  <button class="main" id="copy" type="button">글자 복사</button>
+  <button class="main" id="saveImg" type="button">사진 저장</button>
 </div><div class="toast" id="toast" aria-live="polite"></div></div>
 </div>
 <div id="panel-trend" hidden>
@@ -333,6 +342,7 @@ pre#out { font-size: 18px; }
   <section>
     <h2>보낼 사진 순서</h2>
     <div id="packList"></div>
+    <label class="chk"><input type="checkbox" id="wmMsgImg"> 메시지 사진도 함께 저장</label>
   </section>
 
   <section>
@@ -344,7 +354,7 @@ pre#out { font-size: 18px; }
   <section>
     <h2>AI 사용 표시 (워터마크)</h2>
     <label class="chk"><input type="checkbox" id="wmMsg"> 메시지 맨 아래에 한 줄 넣기</label>
-    <label class="chk"><input type="checkbox" id="wmPhoto"> 트렌드 사진 구석에 작게 넣기</label>
+    <label class="chk"><input type="checkbox" id="wmPhoto"> 사진 구석에 작게 넣기 (메시지·트렌드 사진)</label>
     <label class="chk"><input type="checkbox" id="wmExtra"> 운전상황 등 추가 사진에도 넣기</label>
     <p class="hd" style="margin:10px 0 4px">문구</p>
     <input type="text" id="wmText" maxlength="40" placeholder="AI 활용 작성">
@@ -371,15 +381,41 @@ pre#out { font-size: 18px; }
 
 <script>
 window.WM = (function () {
-  const KEY = "wm-settings-v1";
-  const s = { text: "AI 활용 작성", msg: true, photo: true, extra: false };
+  const KEY = "wm-settings-v2";
+  const s = { text: "AI 활용 작성", msg: true, photo: true, extra: true, msgImg: true };
   try { Object.assign(s, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) {}
   return {
     get: () => s,
     set(p) { Object.assign(s, p); try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} document.dispatchEvent(new Event("wmchange")); },
-    msgLines() { const t = (s.text || "").trim(); return s.msg && t ? ["", "※ " + t] : []; }
+    msgLines() { const t = (s.text || "").trim(); return s.msg && t ? ["", "※ " + t] : []; },
+    draw(ctx, w, h) {
+      const t = (s.text || "").trim(); if (!t) return;
+      const fs = Math.max(20, Math.round(w * 0.016));
+      ctx.save();
+      ctx.font = fs + 'px "Noto Sans KR", system-ui, "Malgun Gothic", sans-serif';
+      ctx.textBaseline = "bottom"; ctx.textAlign = "right";
+      const x = w - fs * 0.8, y = h - fs * 0.6;
+      ctx.lineWidth = Math.max(2, fs * 0.18); ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.strokeText(t, x, y);
+      ctx.fillStyle = "rgba(20,23,28,.6)"; ctx.fillText(t, x, y);
+      ctx.restore();
+    }
   };
 })();
+window.OPS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+window.OPS_SAVE_HINT = window.OPS_IOS
+  ? "누르면 공유 목록이 나옵니다. '이미지 저장'을 고르면 사진 앱에 저장됩니다."
+  : "누르면 사진이 휴대폰에 저장됩니다. 갤러리의 '다운로드' 앨범에서 찾을 수 있습니다.";
+window.OPS_SAVE = async function (files, hintEl) {
+  if (window.OPS_IOS && navigator.canShare && navigator.canShare({ files })) {
+    try { await navigator.share({ files }); return; }
+    catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  files.forEach((f, i) => setTimeout(() => {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(f); a.download = f.name;
+    document.body.appendChild(a); a.click(); a.remove();
+  }, i * 800));
+  if (hintEl) hintEl.textContent = files.length + "장을 저장했습니다. 저장이 안 되면 사진을 길게 눌러 '이미지 저장'을 고르세요.";
+};
 (function () {
 
 const KEYS = ["temp","weather","humidity","pressure","gt","gt2","st","st2","reverse","raw","demi","normal","cfp","emer","nox","nh3","steam","notes"];
@@ -437,7 +473,7 @@ function build() {
     `■ 특이사항`,
     ...(notes.length ? notes.map(s => `- ${s}`) : ["- 특이사항 없음"])
   ];
-  return { text: lines.concat(window.WM.msgLines()).join("\n"), missing: missing.map(k => label[k]), cc, cc2 };
+  return { text: lines.concat(window.WM.msgLines()).join("\n"), plain: lines.join("\n"), missing: missing.map(k => label[k]), cc, cc2 };
 }
 
 function render() {
@@ -482,7 +518,54 @@ $("clear").addEventListener("click", () => {
 });
 render();
 
-document.addEventListener("wmchange", render);
+document.addEventListener("wmchange", () => { render(); renderImgSoon(); });
+
+const msgCv = document.getElementById("msgCv");
+const MSG_FONT = '"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif';
+function renderImg() {
+  const r = build();
+  const ctx = msgCv.getContext("2d");
+  if (r.missing.length) {
+    msgCv.width = 1080; msgCv.height = 220;
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, 1080, 220);
+    ctx.fillStyle = "#a8531a"; ctx.font = "700 40px " + MSG_FONT; ctx.textBaseline = "middle";
+    ctx.fillText("빈 칸이 있어 사진을 만들 수 없습니다", 56, 110);
+    return null;
+  }
+  const W0 = 1080, pad = 56, fs = 42, lh = Math.round(fs * 1.55);
+  const mctx = document.createElement("canvas").getContext("2d");
+  const lines = [];
+  r.plain.split("\n").forEach((ln, i) => {
+    const bold = i === 0 || ln.startsWith("■");
+    mctx.font = (bold ? "700 " : "400 ") + fs + "px " + MSG_FONT;
+    let cur = "";
+    for (const ch of ln) {
+      if (cur && mctx.measureText(cur + ch).width > W0 - 2 * pad) { lines.push({ t: cur, bold }); cur = "   " + ch; }
+      else cur += ch;
+    }
+    lines.push({ t: cur, bold });
+  });
+  const H0 = pad * 2 + lines.length * lh + 24;
+  msgCv.width = W0; msgCv.height = H0;
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W0, H0);
+  ctx.textBaseline = "top"; ctx.fillStyle = "#1c2530";
+  lines.forEach((l, i) => { ctx.font = (l.bold ? "700 " : "400 ") + fs + "px " + MSG_FONT; ctx.fillText(l.t, pad, pad + i * lh); });
+  if (WM.get().photo) WM.draw(ctx, W0, H0);
+  return msgCv;
+}
+let imgTimer = null;
+function renderImgSoon() { clearTimeout(imgTimer); imgTimer = setTimeout(renderImg, 120); }
+new MutationObserver(renderImgSoon).observe($("out"), { childList: true, characterData: true, subtree: true });
+window.OPS_MSG_READY = () => build().missing.length === 0;
+window.OPS_MSG = () => new Promise(res => { const c = renderImg(); if (!c) return res(null); c.toBlob(res, "image/jpeg", 0.92); });
+$("saveImg").addEventListener("click", async () => {
+  const blob = await window.OPS_MSG();
+  if (!blob) { flash("빈 칸이 있어 사진을 만들 수 없습니다."); return; }
+  const d = new Date();
+  await window.OPS_SAVE([new File([blob], "message_" + (d.getMonth() + 1) + "-" + d.getDate() + ".jpg", { type: "image/jpeg" })], $("msgImgHint"));
+});
+$("msgImgHint").textContent = window.OPS_SAVE_HINT;
+renderImg();
 
 })();
 (function () {
@@ -661,17 +744,7 @@ function draw(boxes = showBoxes) {
   });
   if (WM.get().photo) drawWM(ctx, W, H);
 }
-function drawWM(ctx, w, h) {
-  const t = (WM.get().text || "").trim(); if (!t) return;
-  const fs = Math.max(14, Math.round(w * 0.016));
-  ctx.save();
-  ctx.font = `${fs}px "Noto Sans KR", system-ui, "Malgun Gothic", sans-serif`;
-  ctx.textBaseline = "bottom"; ctx.textAlign = "right";
-  const x = w - fs * 0.8, y = h - fs * 0.6;
-  ctx.lineWidth = Math.max(2, fs * 0.18); ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.strokeText(t, x, y);
-  ctx.fillStyle = "rgba(20,23,28,.6)"; ctx.fillText(t, x, y);
-  ctx.restore();
-}
+function drawWM(ctx, w, h) { WM.draw(ctx, w, h); }
 function refresh(replace) {
   if (!img || cropMode) return;
   const lists = textBlocks();
@@ -1019,6 +1092,10 @@ function extraWM(f) {
 function packItems() {
   saveCur();
   const it = [];
+  if (WM.get().msgImg) {
+    const ok = !!(window.OPS_MSG_READY && window.OPS_MSG_READY());
+    it.push({ kind: "msg", ready: ok, label: "메시지 사진", note: ok ? "준비됨" : "메시지 입력 칸을 확인해 주세요", warn: !ok });
+  }
   [0, 1].forEach(p => {
     const s = S[p];
     it.push({ kind: "trend", p, ready: !!s.img, label: `트렌드 ${p+1}`, note: !s.img ? "사진 없음" : s.blocks.length ? "글자 넣음" : "글자 없이 사진만" , warn: !s.img || !s.blocks.length });
@@ -1038,6 +1115,11 @@ $("packSave").addEventListener("click", async () => {
   for (const x of packItems()) {
     if (!x.ready) continue;
     k++;
+    if (x.kind === "msg") {
+      const mb = await window.OPS_MSG();
+      if (mb) files.push(new File([mb], `${pad(k)}_message_${stamp()}.jpg`, { type: "image/jpeg" }));
+      continue;
+    }
     if (x.kind === "trend") {
       files.push(new File([await blobOf(S[x.p])], `${pad(k)}_trend${x.p + 1}_${stamp()}.jpg`, { type: "image/jpeg" }));
     } else {
@@ -1060,7 +1142,9 @@ document.addEventListener("tabshow", e => { if (e.detail === "pack") packUpdate(
   $("wmText").addEventListener("input", () => WM.set({ text: $("wmText").value }));
   ["wmMsg", "wmPhoto", "wmExtra"].forEach(id => $(id).addEventListener("change", () =>
     WM.set({ msg: $("wmMsg").checked, photo: $("wmPhoto").checked, extra: $("wmExtra").checked })));
-  document.addEventListener("wmchange", () => { if (img && !cropMode) draw(); });
+  $("wmMsgImg").checked = w.msgImg;
+  $("wmMsgImg").addEventListener("change", () => WM.set({ msgImg: $("wmMsgImg").checked }));
+  document.addEventListener("wmchange", () => { if (img && !cropMode) draw(); packUpdate(); });
 })();
 
 loadCur();

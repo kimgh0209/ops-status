@@ -358,7 +358,7 @@ input.ocr { outline: 3px solid #e0a800; background: rgba(224, 168, 0, .16) !impo
   <section>
     <h2>추가 사진 (운전상황 등)</h2>
     <label class="chk"><input type="checkbox" id="wmOcr"> 요약 화면 사진에서 값 자동으로 읽기</label>
-    <p class="hint" style="margin:0 0 10px">DCS 요약 화면을 찍으면 대기온도·습도·대기압, GT·ST 출력과 괄호값, 역송량, NOx, NH3, Raw·Demi 탱크, CV 개도를 읽어서 메시지 입력 칸에 넣습니다. CFP, Normal Pond, Emer Pond, 공정증기, 날씨는 직접 입력하세요.</p>
+    <p class="hint" style="margin:0 0 10px">DCS 요약 화면을 찍으면 대기온도·습도·대기압, GT·ST 출력과 괄호값, 역송량, NOx, NH3, Raw·Demi 탱크, CV 개도, 공정증기(PROCESS STEAM 평균 t/h)를 읽어서 메시지 입력 칸에 넣습니다. CFP, Normal Pond, Emer Pond, 날씨는 직접 입력하세요.</p>
     <div id="extras"></div>
     <p class="hint">사진을 찍거나 고르면 바로 자르기 화면이 열립니다. 자르지 않으려면 '취소'를 누르세요. 나중에 '다시 자르기'로 고칠 수 있습니다.</p>
   </section>
@@ -1078,7 +1078,7 @@ const TPL = {
     temp: [440, 492, 545, 545], humidity: [442, 722, 548, 775], pressure: [446, 892, 552, 945],
     nox: [1082, 524, 1184, 573], nh3: [1080, 721, 1185, 770],
     gt: [150, 1065, 317, 1150], st: [612, 1060, 779, 1148], gtkw: [178, 1205, 285, 1257], stkw: [637, 1197, 740, 1248],
-    tl1: [1044, 1140, 1147, 1190], tl2: [1044, 1280, 1147, 1330], aic: [1047, 1503, 1147, 1551],
+    tl1: [1044, 1140, 1147, 1190], tl2: [1044, 1280, 1147, 1330], aic: [1047, 1503, 1147, 1551], steam: [1064, 948, 1172, 995],
     raw: [224, 1740, 330, 1792], demi: [565, 1741, 668, 1790]
   }
 };
@@ -1090,7 +1090,7 @@ const OCR_RULES = {
   temp: { min: -40, max: 60, dec: 1 }, humidity: { min: 0, max: 100, dec: 1 }, pressure: { min: 900, max: 1100 },
   nox: { min: 0, max: 100, dec: 2 }, nh3: { min: 0, max: 50, dec: ds => ds.length === 2 ? ds[0] + "." + ds[1] : ds.length === 3 ? ds[0] + "." + ds.slice(1) : null },
   gt: { min: 0, max: 700 }, st: { min: 0, max: 700 }, gtkw: { min: 0, max: 700000 }, stkw: { min: 0, max: 700000 },
-  tl1: { min: -500, max: 500 }, tl2: { min: -500, max: 500 }, aic: { min: 0, max: 100 },
+  tl1: { min: -500, max: 500 }, tl2: { min: -500, max: 500 }, aic: { min: 0, max: 100 }, steam: { min: 0, max: 500 },
   raw: { min: 0, max: 60000 }, demi: { min: 0, max: 60000 }
 };
 const normLab = t => String(t).toUpperCase().replace(/[^A-Z0-9#]/g, "");
@@ -1361,6 +1361,7 @@ const OCR_FIELDS = [
   { f: "st", k: "st", name: "ST" }, { f: "st2", k: "stkw", name: "ST 괄호값", conv: v => String(Math.round(Number(v) / 1000)) },
   { f: "nox", k: "nox", name: "NOx" }, { f: "nh3", k: "nh3", name: "NH3" },
   { f: "raw", k: "raw", name: "Raw TK" }, { f: "demi", k: "demi", name: "Demi TK" },
+  { f: "steam", k: "steam", name: "공정증기" },
   { f: "aic", k: "aic", name: "CV 개도", conv: v => (Number(v) <= 2 ? "Close" : String(Number(v))) }
 ];
 const OCR_IDS = OCR_FIELDS.map(x => x.f).concat(["reverse"]);

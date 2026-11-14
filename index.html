@@ -113,6 +113,11 @@ input[type=file] { display: none; }
 .thumb { width: 100%; max-height: 240px; object-fit: contain; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
 .packrow { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .packrow:last-child { border-bottom: 0; }
+.cropbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: var(--surface); border-top: 1px solid var(--line);
+  padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.cropbar .in { max-width: 600px; margin: 0 auto; display: flex; gap: 8px; }
+.cropbar button { flex: 1; }
 
 
 /* 큰 글씨 */
@@ -250,8 +255,6 @@ pre#out { font-size: 18px; }
     <p class="hint" id="fileHint">사진을 선택하면 아래 미리보기에 나타납니다.</p>
     <div class="btns" id="editBtns" style="margin-top:8px" hidden>
       <button type="button" id="cropBtn">자르기</button>
-      <button type="button" class="main" id="cropApply" hidden>자르기 적용</button>
-      <button type="button" id="cropCancel" hidden>취소</button>
       <button type="button" id="rotBtn">90° 회전</button>
       <button type="button" id="resetBtn">원본으로</button>
     </div>
@@ -299,6 +302,12 @@ pre#out { font-size: 18px; }
     <p class="hint" id="saveHint"></p>
     <p class="hint">카톡으로 여러 장을 한꺼번에 보내려면 '사진 모으기' 탭에서 저장하세요.</p>
   </section>
+</div>
+<div class="cropbar" id="cropbar" hidden>
+  <div class="in">
+    <button type="button" id="cropCancel">취소</button>
+    <button type="button" class="main" id="cropApply">자르기 적용</button>
+  </div>
 </div>
 
 </div>
@@ -647,7 +656,7 @@ async function loadFromSrc(src, name) {
 function setCropUI() {
   $("editBtns").hidden = !img;
   $("cropBtn").hidden = cropMode; $("rotBtn").hidden = cropMode; $("resetBtn").hidden = cropMode;
-  $("cropApply").hidden = !cropMode; $("cropCancel").hidden = !cropMode;
+  $("cropbar").hidden = !cropMode;
   $("cv").classList.toggle("move", moveMode || cropMode);
 }
 $("cropBtn").addEventListener("click", () => {
@@ -657,8 +666,9 @@ $("cropBtn").addEventListener("click", () => {
   crop = { x: mx, y: my, w: W - 2 * mx, h: H - 2 * my };
   setCropUI();
   $("stageHint").className = "hint";
-  $("stageHint").textContent = "사진 위의 네 모서리 동그라미를 끌어서 남길 부분을 맞춘 뒤 '자르기 적용'을 누르세요. 안쪽을 끌면 영역 전체가 움직입니다.";
+  $("stageHint").textContent = "사진 위의 네 모서리 동그라미를 끌어서 남길 부분을 맞춘 뒤, 화면 아래의 '자르기 적용'을 누르세요. 안쪽을 끌면 영역 전체가 움직입니다.";
   draw();
+  $("stage").scrollIntoView({ behavior: "auto", block: "center" });
 });
 $("cropCancel").addEventListener("click", () => { cropMode = false; crop = null; setCropUI(); autoPlaceOrDraw(); });
 $("cropApply").addEventListener("click", () => {

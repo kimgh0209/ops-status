@@ -1,0 +1,650 @@
+<title>운전현황 도우미</title>
+<meta charset="utf-8">
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&display=swap">
+<style>
+/* 레이아웃: 한 칼럼 입력 폼 + 하단 고정 복사 바. 현장 장부 느낌의 차분한 청회색 */
+:root {
+  --bg: #f3f5f7;
+  --surface: #ffffff;
+  --fg: #1c2530;
+  --muted: #5d6b7a;
+  --line: #d5dbe2;
+  --accent: #1f5f8b;
+  --accent-fg: #ffffff;
+  --warn: #a8531a;
+  --ok: #1d7a4d;
+  --font-body: "Noto Sans KR", system-ui, -apple-system, "Malgun Gothic", sans-serif;
+  --font-num: "Noto Sans KR", system-ui, "Malgun Gothic", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12181f; --surface: #1b232c; --fg: #e6ebf0; --muted: #98a6b5; --line: #2e3a46;
+    --accent: #6db3e3; --accent-fg: #0d1a24; --warn: #e59a62; --ok: #6cc596; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12181f; --surface: #1b232c; --fg: #e6ebf0; --muted: #98a6b5; --line: #2e3a46;
+  --accent: #6db3e3; --accent-fg: #0d1a24; --warn: #e59a62; --ok: #6cc596; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.5;
+  padding-block: 16px 110px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1 { font-size: 20px; margin: 0; text-wrap: balance; }
+.sub { color: var(--muted); font-size: 13px; margin: 2px 0 0; }
+section { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+h2 { font-size: 13px; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; font-weight: 700; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.f { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.f.full { grid-column: 1 / -1; }
+label { font-size: 13px; color: var(--muted); }
+input, textarea {
+  width: 100%; font: inherit; font-size: 18px; font-variant-numeric: tabular-nums;
+  color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 10px;
+}
+textarea { font-size: 16px; min-height: 110px; resize: vertical; }
+input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.chip { border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 14px; }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.calc { font-size: 14px; color: var(--muted); margin: 8px 0 0; font-variant-numeric: tabular-nums; }
+.calc b { color: var(--fg); }
+pre#out {
+  margin: 0; white-space: pre-wrap; word-break: break-word; font-family: var(--font-body); font-size: 15px; line-height: 1.55;
+}
+.warn { color: var(--warn); font-size: 14px; margin: 0 0 8px; }
+.bar {
+  position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line);
+  padding-top: 10px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.bar .in { max-width: 560px; margin: 0 auto; display: flex; gap: 8px; }
+button.main { flex: 1; font: inherit; font-size: 17px; font-weight: 700; padding: 13px; border: 0; border-radius: 10px; background: var(--accent); color: var(--accent-fg); }
+button.alt { font: inherit; font-size: 15px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); }
+.toast { color: var(--ok); font-size: 14px; min-height: 20px; margin-top: 6px; text-align: center; }
+
+* { box-sizing: border-box; }
+h1 { font-size: 20px; margin: 0; }
+.sub { color: var(--muted); font-size: 13px; margin: 2px 0 0; }
+section { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+h2 { font-size: 13px; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; font-weight: 700; }
+.rows { display: flex; flex-direction: column; gap: 8px; }
+.row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 16px minmax(0, 1fr) minmax(0, .7fr); gap: 6px; align-items: center; }
+.row .tilde { text-align: center; color: var(--muted); }
+.hd { font-size: 12px; color: var(--muted); }
+input[type=text], textarea {
+  width: 100%; font: inherit; font-size: 16px; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 9px 8px; min-width: 0;
+}
+textarea { min-height: 84px; resize: vertical; }
+input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+button, .filebtn {
+  font: inherit; font-size: 15px; padding: 11px 14px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--fg); cursor: pointer;
+}
+button.main, .filebtn.main { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 700; }
+button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.preset button { flex: 1; font-weight: 700; }
+.ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.ctl label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.sw { display: inline-flex; gap: 6px; }
+.sw button { width: 34px; height: 34px; padding: 0; border-radius: 50%; border: 2px solid var(--line); }
+.sw button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+#stage { width: 100%; overflow: hidden; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
+canvas { display: block; width: 100%; height: auto; }
+canvas.move { touch-action: none; cursor: grab; }
+.hint { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+.ok { color: var(--ok); }
+.warn { color: var(--warn); }
+#result img { width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
+input[type=file] { display: none; }
+
+
+/* 탭 */
+#top { margin-bottom: 16px; }
+.wrap { max-width: 600px; }
+.bar .in { max-width: 600px; }
+.tabs { display: flex; gap: 8px; }
+.tabs button { flex: 1; font-weight: 700; }
+#notes { min-height: 110px; }
+</style>
+
+<div class="wrap" id="top">
+  <header>
+    <h1>이천사업소 운전현황</h1>
+  </header>
+  <div class="tabs" role="group" aria-label="기능 선택">
+    <button type="button" data-tab="msg" aria-pressed="true">메시지 입력</button>
+    <button type="button" data-tab="trend" aria-pressed="false">트렌드 사진</button>
+  </div>
+</div>
+
+<div id="panel-msg">
+<div class="wrap">
+  <header>
+    
+    <p class="sub" id="today"></p>
+  </header>
+
+  <section>
+    <h2>기상</h2>
+    <div class="grid">
+      <div class="f"><label for="temp">대기온도 (℃)</label><input id="temp" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="humidity">습도 (%)</label><input id="humidity" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="pressure">대기압 (mbar)</label><input id="pressure" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="weather">날씨</label><input id="weather" autocomplete="off">
+        <div class="chips" id="wchips"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>CC 운전현황</h2>
+    <div class="grid">
+      <div class="f"><label for="gt">GT 출력 (MW)</label><input id="gt" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="gt2">GT 괄호값 (MW)</label><input id="gt2" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="st">ST 출력 (MW)</label><input id="st" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="st2">ST 괄호값 (MW)</label><input id="st2" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="reverse">역송량 (MW)</label><input id="reverse" inputmode="decimal" autocomplete="off"></div>
+    </div>
+    <p class="calc" id="cc"></p>
+  </section>
+
+  <section>
+    <h2>WT/WWT 운전현황 (mm)</h2>
+    <div class="grid">
+      <div class="f"><label for="raw">Raw TK</label><input id="raw" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="demi">Demi TK</label><input id="demi" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="normal">Normal Pond</label><input id="normal" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="cfp">CFP</label><input id="cfp" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="emer">Emer Pond</label><input id="emer" inputmode="decimal" autocomplete="off"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>CEMS · 공정증기</h2>
+    <div class="grid">
+      <div class="f"><label for="nox">NOx (ppm)</label><input id="nox" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="nh3">NH3 (ppm)</label><input id="nh3" inputmode="decimal" autocomplete="off"></div>
+      <div class="f"><label for="steam">공정증기 (t/h)</label><input id="steam" inputmode="decimal" autocomplete="off"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>특이사항 (한 줄에 하나)</h2>
+    <div class="f"><label for="notes" class="sr" style="position:absolute;left:-9999px">특이사항</label><textarea id="notes"></textarea></div>
+  </section>
+
+  <section>
+    <h2>완성된 메시지</h2>
+    <p class="warn" id="warn" hidden></p>
+    <pre id="out"></pre>
+  </section>
+</div>
+
+<div class="bar"><div class="in">
+  <button class="alt" id="clear" type="button">값 비우기</button>
+  <button class="main" id="copy" type="button">메시지 복사</button>
+</div><div class="toast" id="toast" aria-live="polite"></div></div>
+</div>
+<div id="panel-trend" hidden>
+<div class="wrap">
+  <header>
+    
+    <p class="sub">트렌드 사진에 적을 글자를 입력하면 사진의 빈 곳에 손글씨 느낌으로 넣어 줍니다. 사진은 이 기기 안에서만 처리되고 어디로도 전송되지 않습니다.</p>
+  </header>
+
+  <section>
+    <h2>트렌드 종류</h2>
+    <div class="btns preset" role="group" aria-label="트렌드 종류">
+      <button type="button" data-p="0" aria-pressed="true">트렌드 1</button>
+      <button type="button" data-p="1" aria-pressed="false">트렌드 2</button>
+    </div>
+    <p class="hint" id="presetHint"></p>
+  </section>
+
+  <section>
+    <h2>1. 트렌드 사진</h2>
+    <div class="btns">
+      <label class="filebtn main" for="file">사진 선택</label>
+      <input type="file" id="file" accept="image/*">
+    </div>
+    <p class="hint" id="fileHint">사진을 선택하면 아래 미리보기에 나타납니다.</p>
+  </section>
+
+  <section>
+    <h2>2. 적을 내용</h2>
+    <div class="rows" id="rows">
+      <div class="row hd"><span>항목</span><span>최소</span><span></span><span>최대</span><span>단위</span></div>
+    </div>
+    <p class="hint">값을 비운 줄은 사진에 넣지 않습니다. 항목 이름과 단위는 고치면 기억합니다.</p>
+    <p class="hd" style="margin:10px 0 4px">메모 (한 줄에 하나, 비워도 됩니다)</p>
+    <textarea id="memo" placeholder="예) 11:24 안전계통 고장"></textarea>
+  </section>
+
+  <section>
+    <h2>3. 모양</h2>
+    <div class="ctl">
+      <label>글씨 크기 <input type="range" id="size" min="14" max="60" value="34"></label>
+      <div class="sw" role="group" aria-label="글씨 색">
+        <button type="button" data-c="#1a3fb0" style="background:#1a3fb0" aria-label="파랑" aria-pressed="true"></button>
+        <button type="button" data-c="#c0182b" style="background:#c0182b" aria-label="빨강" aria-pressed="false"></button>
+        <button type="button" data-c="#14171c" style="background:#14171c" aria-label="검정" aria-pressed="false"></button>
+      </div>
+    </div>
+    <div class="btns" style="margin-top:10px">
+      <button type="button" id="auto">빈 곳에 다시 배치</button>
+      <button type="button" id="moveToggle" aria-pressed="false">손가락으로 글씨 옮기기: 꺼짐</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 미리보기</h2>
+    <div id="stage"><canvas id="cv" width="800" height="560"></canvas></div>
+    <p class="hint" id="stageHint">사진을 선택해 주세요.</p>
+    <div class="btns" style="margin-top:10px">
+      <button type="button" class="main" id="make">결과 이미지 만들기</button>
+    </div>
+  </section>
+
+  <section id="result" hidden>
+    <h2>5. 완성 이미지</h2>
+    <img id="resultImg" alt="글자가 들어간 트렌드 사진">
+    <div class="btns" style="margin-top:10px">
+      <button type="button" id="share" hidden>공유하기 (카톡 선택)</button>
+      <button type="button" id="dl">파일로 저장</button>
+    </div>
+    <p class="hint" id="saveHint">저장이 안 되면 위 이미지를 길게 눌러 사진으로 저장하세요.</p>
+  </section>
+</div>
+</div>
+
+<script>
+(function () {
+
+const KEYS = ["temp","weather","humidity","pressure","gt","gt2","st","st2","reverse","raw","demi","normal","cfp","emer","nox","nh3","steam","notes"];
+const SAMPLE = {temp:"10.1",weather:"맑음",humidity:"96.0",pressure:"1007",gt:"398",gt2:"384",st:"166",st2:"162",reverse:"0",
+  raw:"21117",demi:"12239",normal:"2806",cfp:"5187",emer:"68",nox:"3.43",nh3:"2.07",steam:"90",
+  notes:"ST #1 BRG 진동 변화 모니터링 중\nGT Anti-Icing CV Close"};
+const STORE = "ops-status-last-v1";
+const $ = id => document.getElementById(id);
+
+function load() {
+  let d = {};
+  try { d = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) {}
+  KEYS.forEach(k => { $(k).value = (d[k] !== undefined ? d[k] : SAMPLE[k]); });
+}
+function save() {
+  const d = {}; KEYS.forEach(k => d[k] = $(k).value);
+  try { localStorage.setItem(STORE, JSON.stringify(d)); } catch (e) {}
+}
+const num = s => { const t = String(s).replace(/,/g, "").trim(); return t === "" ? NaN : Number(t); };
+const comma = n => Math.round(n).toLocaleString("en-US");
+
+function build() {
+  const v = {}; KEYS.forEach(k => v[k] = $(k).value);
+  const missing = [];
+  const need = k => { const n = num(v[k]); if (isNaN(n)) missing.push(k); return n; };
+  const label = {temp:"대기온도",humidity:"습도",pressure:"대기압",gt:"GT",gt2:"GT 괄호값",st:"ST",st2:"ST 괄호값",reverse:"역송량",raw:"Raw TK",demi:"Demi TK",normal:"Normal Pond",cfp:"CFP",emer:"Emer Pond",nox:"NOx",nh3:"NH3",steam:"공정증기"};
+  const n = {}; Object.keys(label).forEach(k => n[k] = need(k));
+  if (!v.weather.trim()) missing.push("weather");
+  label.weather = "날씨";
+  const now = new Date();
+  const notes = v.notes.split("\n").map(s => s.trim().replace(/^-\s*/, "")).filter(Boolean);
+  const r = x => Math.round(x);
+  const cc = r(n.gt) + r(n.st), cc2 = r(n.gt2) + r(n.st2);
+  const lines = [
+    `${now.getMonth()+1}월 ${now.getDate()}일 07시 이천사업소 운전 현황`,
+    `■ 대기온도 : ${n.temp.toFixed(1)}℃(${v.weather.trim()})`,
+    `■ 습도 : ${n.humidity.toFixed(1)}%`,
+    `■ 대기압 : ${r(n.pressure)}mbar`,
+    `■ CC 운전현황`,
+    ` • CC : ${cc}MW(${cc2}MW)`,
+    ` • GT : ${r(n.gt)}MW(${r(n.gt2)}MW)`,
+    ` • ST : ${r(n.st)}MW(${r(n.st2)}MW)`,
+    ` • 역송량 : ${r(n.reverse)}MW`,
+    `■ WT/WWT 운전현황`,
+    ` • Raw TK : ${comma(n.raw)}mm`,
+    `- Demi TK : ${comma(n.demi)}mm`,
+    `- Normal Pond: ${comma(n.normal)}mm`,
+    `- CFP : ${comma(n.cfp)}mm`,
+    `- Emer Pond : ${comma(n.emer)}mm`,
+    `■ CEMS 운전현황`,
+    `- NOx : ${n.nox.toFixed(2)}ppm`,
+    `- NH3 : ${n.nh3.toFixed(2)}ppm`,
+    `■ 공정증기`,
+    `- ${r(n.steam)}t/h 공급 중`,
+    `■ 특이사항`,
+    ...(notes.length ? notes.map(s => `- ${s}`) : ["- 특이사항 없음"])
+  ];
+  return { text: lines.join("\n"), missing: missing.map(k => label[k]), cc, cc2 };
+}
+
+function render() {
+  const { text, missing, cc, cc2 } = build();
+  $("out").textContent = missing.length ? "" : text;
+  const w = $("warn");
+  w.hidden = !missing.length;
+  w.textContent = missing.length ? "비어 있거나 숫자가 아닌 칸: " + missing.join(", ") : "";
+  $("cc").innerHTML = isNaN(cc) || isNaN(cc2) ? "" : `CC 합계 <b>${cc} MW</b> (괄호 <b>${cc2} MW</b>) · GT+ST 자동 계산`;
+  document.querySelectorAll("#wchips .chip").forEach(c => c.setAttribute("aria-pressed", String(c.textContent === $("weather").value.trim())));
+  save();
+}
+
+function flash(msg) { $("toast").textContent = msg; setTimeout(() => { $("toast").textContent = ""; }, 3000); }
+
+async function copy() {
+  const { text, missing } = build();
+  if (missing.length) { flash("비어 있는 칸이 있어 복사하지 않았습니다."); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    flash("복사했습니다. 카톡에서 붙여넣기 하세요.");
+  } catch (e) {
+    const range = document.createRange(); range.selectNodeContents($("out"));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    flash("복사가 막혀 있어 메시지를 선택해 두었습니다. 길게 눌러 복사하세요.");
+  }
+}
+
+["맑음","흐림","비","눈","구름많음"].forEach(t => {
+  const b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.textContent = t;
+  b.addEventListener("click", () => { $("weather").value = t; render(); });
+  $("wchips").appendChild(b);
+});
+const d0 = new Date();
+$("today").textContent = `${d0.getMonth()+1}월 ${d0.getDate()}일 · 어제 값이 채워져 있습니다. 바뀐 칸만 고치세요.`;
+load();
+KEYS.forEach(k => $(k).addEventListener("input", render));
+$("copy").addEventListener("click", copy);
+$("clear").addEventListener("click", () => {
+  KEYS.filter(k => k !== "notes" && k !== "weather").forEach(k => $(k).value = "");
+  render(); $("temp").focus();
+});
+render();
+
+})();
+(function () {
+
+const $ = id => document.getElementById(id);
+const FONT = '"Nanum Pen Script", "Gaegu", "Segoe Print", cursive';
+const PREF = "trend-note-pref-v2";
+const NROWS = 4;
+const DEFAULT_LABELS = [
+  [["GT Load", "MW"], ["ST Load", "MW"], ["ST BRG Vib", "µm"], ["", ""]],
+  [["ST Load", "MW"], ["P/S HDR press", "bar"], ["P/S HDR Flow", "t/h"], ["", ""]]
+];
+const EMPTY_HINT = "사진을 선택하면 아래 미리보기에 나타납니다.";
+
+let img = null, W = 0, H = 0;
+let blocks = [];            // {lines:[], x, y, w, h}
+let color = "#1a3fb0", moveMode = false, drag = null, showBoxes = true;
+let cur = 0;                // 현재 트렌드 종류 (0, 1)
+let blobCache = null;
+const rows = [...Array(NROWS).keys()];
+const S = [0, 1].map(() => ({ img: null, W: 0, H: 0, blocks: [], nums: rows.map(() => ["", ""]), memo: "", hint: EMPTY_HINT, hintCls: "hint", stage: "사진을 선택해 주세요." }));
+
+/* ---------- 저장된 설정 ---------- */
+let pref = {};
+try { pref = JSON.parse(localStorage.getItem(PREF) || "{}"); } catch (e) {}
+const labels = [0, 1].map(p => rows.map(i => (pref.labels && pref.labels[p] && pref.labels[p][i]) || DEFAULT_LABELS[p][i]));
+if (pref.size) $("size").value = pref.size;
+if (pref.color) color = pref.color;
+function savePref() {
+  rows.forEach(i => { labels[cur][i] = [$("l"+i).value, $("u"+i).value]; });
+  try { localStorage.setItem(PREF, JSON.stringify({ labels, size: $("size").value, color })); } catch (e) {}
+}
+
+/* ---------- 입력 행 ---------- */
+rows.forEach(i => {
+  const r = document.createElement("div"); r.className = "row";
+  r.innerHTML = `<input type="text" id="l${i}" aria-label="항목 ${i+1}"><input type="text" id="a${i}" inputmode="decimal" aria-label="최소 ${i+1}" placeholder="383"><span class="tilde">~</span><input type="text" id="b${i}" inputmode="decimal" aria-label="최대 ${i+1}" placeholder="410"><input type="text" id="u${i}" aria-label="단위 ${i+1}">`;
+  $("rows").appendChild(r);
+});
+function syncColorButtons() {
+  document.querySelectorAll(".sw button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.c === color)));
+}
+syncColorButtons();
+
+function textBlocks() {
+  const rangeLines = [];
+  rows.forEach(i => {
+    const l = $("l"+i).value.trim(), a = $("a"+i).value.trim(), b = $("b"+i).value.trim(), u = $("u"+i).value.trim();
+    if (!a && !b) return;
+    const unit = u ? " " + u : "", head = l ? l + " : " : "";
+    rangeLines.push(a && b ? `${head}${a} ~ ${b}${unit}` : `${head}${a || b}${unit}`);
+  });
+  const memoLines = $("memo").value.split("\n").map(s => s.trim()).filter(Boolean);
+  return [rangeLines, memoLines].filter(l => l.length);
+}
+
+/* ---------- 트렌드 종류 전환 ---------- */
+function saveCur() {
+  const s = S[cur];
+  s.img = img; s.W = W; s.H = H; s.blocks = blocks;
+  s.memo = $("memo").value; s.nums = rows.map(i => [$("a"+i).value, $("b"+i).value]);
+  s.hint = $("fileHint").textContent; s.hintCls = $("fileHint").className; s.stage = $("stageHint").textContent;
+}
+function loadCur() {
+  const s = S[cur];
+  img = s.img; W = s.W; H = s.H; blocks = s.blocks;
+  rows.forEach(i => {
+    $("l"+i).value = labels[cur][i][0]; $("u"+i).value = labels[cur][i][1];
+    $("a"+i).value = s.nums[i][0]; $("b"+i).value = s.nums[i][1];
+  });
+  $("memo").value = s.memo;
+  $("fileHint").textContent = s.hint; $("fileHint").className = s.hintCls;
+  $("stageHint").textContent = s.stage; $("stageHint").className = "hint";
+  $("file").value = ""; $("result").hidden = true; blobCache = null;
+  const cv = $("cv");
+  if (img) { cv.width = W; cv.height = H; draw(); }
+  else { cv.width = 800; cv.height = 560; const x = cv.getContext("2d"); x.clearRect(0, 0, 800, 560); }
+  document.querySelectorAll(".preset button").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.p) === cur)));
+  $("presetHint").textContent = `트렌드 ${cur+1}: ` + labels[cur].map(x => x[0]).filter(Boolean).join(" · ");
+}
+document.querySelectorAll(".preset button").forEach(b => b.addEventListener("click", () => {
+  const p = Number(b.dataset.p); if (p === cur) return;
+  savePref(); saveCur(); cur = p; loadCur();
+}));
+
+/* ---------- 글자 크기·측정 ---------- */
+const fontPx = () => Math.max(14, Math.round(W * Number($("size").value) / 1000));
+function measure(lines) {
+  const ctx = $("cv").getContext("2d"), fs = fontPx();
+  ctx.font = `${fs}px ${FONT}`;
+  const w = Math.max(...lines.map(s => ctx.measureText(s).width));
+  return { w: Math.ceil(w), h: Math.ceil(fs * 1.3 * lines.length) };
+}
+
+/* ---------- 빈 곳 찾기 ---------- */
+function inkGrid() {
+  const GW = 120, GH = Math.max(20, Math.round(GW * H / W));
+  const K = 8;   // 한 칸을 8x8로 쪼개 가는 글씨 획도 놓치지 않는다
+  const c = document.createElement("canvas"); c.width = GW * K; c.height = GH * K;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(img, 0, 0, c.width, c.height);
+  const d = x.getImageData(0, 0, c.width, c.height).data, lum = [];
+  for (let i = 0; i < d.length; i += 4) lum.push(0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2]);
+  const sorted = lum.slice().sort((a, b) => a - b), paper = sorted[Math.floor(sorted.length * 0.8)];
+  const thr = paper * 0.84, g = new Float32Array(GW * GH);
+  for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+    let n = 0;
+    for (let yy = 0; yy < K; yy++) for (let xx = 0; xx < K; xx++) if (lum[(gy*K+yy) * c.width + gx*K+xx] < thr) n++;
+    g[gy * GW + gx] = Math.min(1, n / 4);
+  }
+  return { g, GW, GH };
+}
+function findSpot(grid, bw, bh) {
+  const { g, GW, GH } = grid;
+  const wc = Math.min(GW - 2, Math.ceil(bw / W * GW) + 4), hc = Math.min(GH - 2, Math.ceil(bh / H * GH) + 3);
+  const I = new Float64Array((GW + 1) * (GH + 1));
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++)
+    I[(y+1)*(GW+1) + x+1] = g[y*GW+x] + I[y*(GW+1)+x+1] + I[(y+1)*(GW+1)+x] - I[y*(GW+1)+x];
+  let best = null;
+  for (let y = 1; y <= GH - hc - 1; y++) for (let x = 1; x <= GW - wc - 1; x++) {
+    const s = I[(y+hc)*(GW+1)+x+wc] - I[y*(GW+1)+x+wc] - I[(y+hc)*(GW+1)+x] + I[y*(GW+1)+x];
+    const cost = s + 1e-3 * (Math.abs(x + wc/2 - GW/2) / GW + Math.abs(y + hc/2 - GH/2) / GH);
+    if (!best || cost < best.cost) best = { cost, x, y };
+  }
+  if (!best) return { x: W * 0.05, y: H * 0.05, free: 0 };
+  return { x: best.x / GW * W, y: best.y / GH * H, free: best.cost / (wc * hc), best, wc, hc };
+}
+function autoPlace() {
+  if (!img) return;
+  const lists = textBlocks();
+  const grid = inkGrid();
+  blocks = [];
+  lists.forEach(lines => {
+    const m = measure(lines);
+    const p = findSpot(grid, m.w, m.h);
+    blocks.push({ lines, x: p.x, y: p.y, w: m.w, h: m.h, free: p.free });
+    if (p.best) for (let y = p.best.y; y < p.best.y + p.hc; y++) for (let x = p.best.x; x < p.best.x + p.wc; x++) grid.g[y*grid.GW+x] = 1;
+  });
+  const crowded = blocks.some(b => b.free > 0.12);
+  $("stageHint").className = "hint" + (crowded ? " warn" : "");
+  $("stageHint").textContent = !blocks.length ? "적을 내용을 입력하면 사진 위에 나타납니다."
+    : crowded ? "빈 곳이 좁아 글자가 선과 겹칠 수 있습니다. 글씨 크기를 줄이거나 직접 옮겨 주세요."
+    : "빈 곳에 배치했습니다. 위치가 마음에 안 들면 '손가락으로 글씨 옮기기'를 켜세요.";
+  draw();
+}
+
+/* ---------- 그리기 ---------- */
+function draw(boxes = showBoxes) {
+  const cv = $("cv"), ctx = cv.getContext("2d");
+  if (!img) return;
+  ctx.drawImage(img, 0, 0, W, H);
+  const fs = fontPx();
+  ctx.font = `${fs}px ${FONT}`; ctx.textBaseline = "top"; ctx.fillStyle = color;
+  blocks.forEach(b => {
+    b.lines.forEach((s, i) => ctx.fillText(s, b.x, b.y + i * fs * 1.3));
+    if (boxes && moveMode) {
+      ctx.save(); ctx.strokeStyle = "#e08a00"; ctx.lineWidth = Math.max(2, W / 600); ctx.setLineDash([10, 8]);
+      ctx.strokeRect(b.x - 6, b.y - 4, b.w + 12, b.h + 8); ctx.restore();
+    }
+  });
+}
+function refresh(replace) {
+  if (!img) return;
+  const lists = textBlocks();
+  const same = lists.length === blocks.length;
+  if (replace || !same) { autoPlace(); return; }
+  blocks.forEach((b, i) => { b.lines = lists[i]; const m = measure(b.lines); b.w = m.w; b.h = m.h; });
+  draw();
+}
+
+/* ---------- 사진 불러오기 ---------- */
+async function loadFromSrc(src, name) {
+  const mine = cur;
+  try { await document.fonts.load(`40px ${FONT}`, "가GT 383~410MW"); } catch (e) {}
+  const im = new Image();
+  im.onload = () => {
+    if (mine !== cur) return;
+    const scale = Math.min(1, 2000 / Math.max(im.naturalWidth, im.naturalHeight));
+    W = Math.round(im.naturalWidth * scale); H = Math.round(im.naturalHeight * scale);
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    c.getContext("2d").drawImage(im, 0, 0, W, H);
+    img = c;
+    const cv = $("cv"); cv.width = W; cv.height = H;
+    $("fileHint").textContent = (name ? name + " · " : "") + `${W}×${H}`;
+    $("fileHint").className = "hint ok";
+    autoPlace();
+  };
+  im.onerror = () => { $("fileHint").textContent = "사진을 열 수 없습니다. 다른 사진으로 시도해 주세요."; $("fileHint").className = "hint warn"; };
+  im.src = src;
+}
+$("file").addEventListener("change", e => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  const url = URL.createObjectURL(f);
+  loadFromSrc(url, f.name);
+});
+
+/* ---------- 입력 반응 ---------- */
+document.querySelectorAll("#rows input, #memo").forEach(el => el.addEventListener("input", () => { savePref(); refresh(false); }));
+$("size").addEventListener("input", () => { savePref(); refresh(true); });
+document.querySelectorAll(".sw button").forEach(b => b.addEventListener("click", () => { color = b.dataset.c; syncColorButtons(); savePref(); draw(); }));
+$("auto").addEventListener("click", () => refresh(true));
+$("moveToggle").addEventListener("click", () => {
+  moveMode = !moveMode;
+  $("moveToggle").setAttribute("aria-pressed", String(moveMode));
+  $("moveToggle").textContent = "손가락으로 글씨 옮기기: " + (moveMode ? "켜짐" : "꺼짐");
+  $("cv").classList.toggle("move", moveMode);
+  draw();
+});
+
+/* ---------- 드래그 이동 ---------- */
+function pos(e) {
+  const r = $("cv").getBoundingClientRect();
+  return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+}
+$("cv").addEventListener("pointerdown", e => {
+  if (!moveMode || !blocks.length) return;
+  const p = pos(e); let best = null, bd = Infinity;
+  blocks.forEach((b, i) => {
+    const cx = Math.min(Math.max(p.x, b.x), b.x + b.w), cy = Math.min(Math.max(p.y, b.y), b.y + b.h);
+    const d = Math.hypot(p.x - cx, p.y - cy);
+    if (d < bd) { bd = d; best = i; }
+  });
+  drag = { i: best, dx: p.x - blocks[best].x, dy: p.y - blocks[best].y };
+  $("cv").setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+$("cv").addEventListener("pointermove", e => {
+  if (!drag) return;
+  const p = pos(e), b = blocks[drag.i];
+  b.x = Math.min(Math.max(0, p.x - drag.dx), W - b.w);
+  b.y = Math.min(Math.max(0, p.y - drag.dy), H - b.h);
+  draw();
+});
+["pointerup", "pointercancel"].forEach(t => $("cv").addEventListener(t, () => { drag = null; }));
+
+/* ---------- 결과 이미지 ---------- */
+function makeResult() {
+  if (!img) { $("stageHint").textContent = "먼저 사진을 선택해 주세요."; $("stageHint").className = "hint warn"; return; }
+  draw(false);
+  $("cv").toBlob(blob => {
+    blobCache = blob;
+    $("resultImg").src = URL.createObjectURL(blob);
+    $("result").hidden = false;
+    const f = new File([blob], "trend.jpg", { type: "image/jpeg" });
+    $("share").hidden = !(navigator.canShare && navigator.canShare({ files: [f] }));
+    draw();
+    $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+  }, "image/jpeg", 0.92);
+}
+$("make").addEventListener("click", makeResult);
+$("dl").addEventListener("click", () => {
+  if (!blobCache) return;
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blobCache);
+  const d = new Date();
+  a.download = `trend${cur+1}_${d.getMonth()+1}-${d.getDate()}.jpg`;
+  document.body.appendChild(a); a.click(); a.remove();
+  $("saveHint").textContent = "저장이 시작되지 않으면 위 이미지를 길게 눌러 사진으로 저장하세요.";
+});
+$("share").addEventListener("click", async () => {
+  if (!blobCache) return;
+  try { await navigator.share({ files: [new File([blobCache], `trend${cur+1}.jpg`, { type: "image/jpeg" })] }); }
+  catch (e) { $("saveHint").textContent = "공유가 취소되었거나 막혀 있습니다. 이미지를 길게 눌러 저장하세요."; }
+});
+
+loadCur();
+
+})();
+(function () {
+
+const PANELS = { msg: "panel-msg", trend: "panel-trend" };
+const btns = document.querySelectorAll(".tabs button");
+function show(name) {
+  if (!PANELS[name]) name = "msg";
+  Object.keys(PANELS).forEach(k => { document.getElementById(PANELS[k]).hidden = (k !== name); });
+  btns.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.tab === name)));
+}
+btns.forEach(b => b.addEventListener("click", () => { location.hash = b.dataset.tab; show(b.dataset.tab); }));
+window.addEventListener("hashchange", () => show(location.hash.slice(1)));
+show(location.hash.slice(1));
+
+})();
+</script>
